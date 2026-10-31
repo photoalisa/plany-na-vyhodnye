@@ -24,8 +24,8 @@ select{border:1px solid var(--line);background:transparent;color:var(--ink);bord
 [hidden]{display:none !important}
 .card{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg)}
 .card__media{display:block;background:var(--chip)}
-/* оригинальные пропорции афиши внутри рамки 4:3, по центру */
-.card__media img{display:block;width:100%;aspect-ratio:4/3;object-fit:contain;object-position:center}
+/* горизонтальная рамка 16:9 — карточка ниже, оригинальные пропорции по центру */
+.card__media img{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;object-position:center}
 .card__body{padding:14px 16px 18px;display:flex;flex-direction:column;gap:8px;flex:1}
 .card__meta{margin:0;font-size:13px;color:var(--accent);font-weight:600}
 .card__title{margin:0;font-size:18px;line-height:1.25}
