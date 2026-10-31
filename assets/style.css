@@ -23,9 +23,9 @@ select{border:1px solid var(--line);background:transparent;color:var(--ink);bord
 /* атрибут hidden должен побеждать display:flex у .card, иначе фильтры не скрывают карточки */
 [hidden]{display:none !important}
 .card{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg)}
-.card__media{display:block;background:var(--chip)}
-/* горизонтальная рамка 16:9 — карточка ниже, оригинальные пропорции по центру */
-.card__media img{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;object-position:center}
+.card__media{display:block;background:var(--chip);aspect-ratio:16/9}
+/* горизонтальная рамка 16:9, афиша по центру без обрезки */
+.card__media img{display:block;width:100%;height:100%;object-fit:contain;object-position:center}
 .card__body{padding:14px 16px 18px;display:flex;flex-direction:column;gap:8px;flex:1}
 .card__meta{margin:0;font-size:13px;color:var(--accent);font-weight:600}
 .card__title{margin:0;font-size:18px;line-height:1.25}
