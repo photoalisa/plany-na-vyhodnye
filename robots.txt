@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://plany-na-vyhodnye.ru/sitemap.xml
