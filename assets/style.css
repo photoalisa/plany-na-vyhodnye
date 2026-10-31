@@ -33,6 +33,8 @@ select{border:1px solid var(--line);background:transparent;color:var(--ink);bord
 .card__price{margin:0;font-size:14px;font-weight:600}
 .card__link{font-size:14px;color:var(--accent);text-decoration:none}
 .card__link:hover{text-decoration:underline}
+.card__report{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;margin-top:2px}
+.card__report:hover{text-decoration:underline}
 .empty{display:none;padding:40px 0;color:var(--muted)}
 .links{display:flex;gap:16px;flex-wrap:wrap;margin:40px 0 0;padding-top:18px;border-top:1px solid var(--line)}
 .links a{color:var(--accent);font-size:14px;text-decoration:none}
