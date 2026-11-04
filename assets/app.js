@@ -2,6 +2,7 @@
 const params = new URLSearchParams(location.search);
 const cards = [...document.querySelectorAll('.card')];
 const chips = [...document.querySelectorAll('.chip[data-filter]')];
+const dayChips = [...document.querySelectorAll('.chip[data-day]')];
 const district = document.querySelector('#district');
 const counter = document.querySelector('[data-count]');
 const empty = document.querySelector('.empty');
@@ -15,6 +16,14 @@ chips.forEach(chip => {
     chip.setAttribute('aria-pressed', 'true');
   }
 });
+
+// день выходных: пусто — оба дня, иначе 'sat' или 'sun'
+let day = ['sat', 'sun'].includes(params.get('day')) ? params.get('day') : '';
+function syncDayChips(){
+  dayChips.forEach(c => c.setAttribute('aria-pressed', String(c.dataset.day === day)));
+}
+syncDayChips();
+
 if (district && params.get('district')) district.value = params.get('district');
 
 function plural(n){
@@ -29,6 +38,7 @@ function syncUrl(){
   ['free','child','dog','nature','outside'].forEach(k => {
     if (active.has(k)) params.set(k, '1'); else params.delete(k);
   });
+  if (day) params.set('day', day); else params.delete('day');
   const d = district ? district.value : '';
   if (d) params.set('district', d); else params.delete('district');
   const q = params.toString();
@@ -41,7 +51,8 @@ function apply(){
   for (const card of cards){
     const okFlags = [...active].every(k => card.dataset[k] === 'true');
     const okDistrict = !d || card.dataset.district === d;
-    const visible = okFlags && okDistrict;
+    const okDay = !day || (card.dataset.days || '').split(' ').includes(day);
+    const visible = okFlags && okDistrict && okDay;
     card.hidden = !visible;
     card.style.display = visible ? '' : 'none';
     if (visible) shown++;
@@ -63,13 +74,21 @@ chips.forEach(chip => chip.addEventListener('click', () => {
   apply();
 }));
 
+dayChips.forEach(chip => chip.addEventListener('click', () => {
+  day = day === chip.dataset.day ? '' : chip.dataset.day;
+  syncDayChips();
+  apply();
+}));
+
 if (district) {
   district.addEventListener('change', apply);
 }
 
 document.querySelectorAll('[data-reset]').forEach(btn => btn.addEventListener('click', () => {
   active.clear();
+  day = '';
   chips.forEach(chip => chip.setAttribute('aria-pressed', 'false'));
+  syncDayChips();
   if (district) district.value = '';
   apply();
 }));
