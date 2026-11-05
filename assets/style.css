@@ -15,6 +15,7 @@ h2{font-size:20px;margin:32px 0 12px}
   display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--line)}
 .chip{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
   padding:7px 14px;font-size:14px;cursor:pointer;font-family:inherit}
+a.chip{display:inline-flex;align-items:center;text-decoration:none}
 .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
 .chip--free{border-color:var(--accent);color:var(--accent);font-weight:600}
 .chip--free[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -39,7 +40,5 @@ select{border:1px solid var(--line);background:transparent;color:var(--ink);bord
 .card__report{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;margin-top:2px}
 .card__report:hover{text-decoration:underline}
 .empty{display:none;padding:40px 0;color:var(--muted)}
-.links{display:flex;gap:16px;flex-wrap:wrap;margin:40px 0 0;padding-top:18px;border-top:1px solid var(--line)}
-.links a{color:var(--accent);font-size:14px;text-decoration:none}
 footer{margin-top:32px;color:var(--muted);font-size:13px}
 @media (max-width:640px){.grid{grid-template-columns:1fr}h1{font-size:24px}}

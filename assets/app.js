@@ -62,7 +62,10 @@ function apply(){
   syncUrl();
 }
 
-chips.forEach(chip => chip.addEventListener('click', () => {
+chips.forEach(chip => chip.addEventListener('click', (e) => {
+  // Чипы — ссылки на страницы подборок: без JS они ведут на /besplatno/ и т.д.,
+  // с JS фильтруют на месте, не перезагружая страницу.
+  e.preventDefault();
   const key = chip.dataset.filter;
   if (active.has(key)){
     active.delete(key);
