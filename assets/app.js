@@ -7,6 +7,18 @@ const district = document.querySelector('#district');
 const counter = document.querySelector('[data-count]');
 const empty = document.querySelector('.empty');
 
+// Действия для счётчика: GoatCounter не ставит cookie и не хранит персональные
+// данные, поэтому согласия посетителя не спрашиваем. Если скрипт не загрузился
+// (блокировщик), track() просто ничего не делает.
+function track(action, label){
+  if (!window.goatcounter || !window.goatcounter.count) return;
+  window.goatcounter.count({
+    path: label ? action + '/' + label : action,
+    title: action,
+    event: true,
+  });
+}
+
 // активные фильтры: из URL (?free=1) или из заранее нажатых чипов на лендинге
 const active = new Set();
 chips.forEach(chip => {
@@ -75,16 +87,33 @@ chips.forEach(chip => chip.addEventListener('click', (e) => {
     chip.setAttribute('aria-pressed', 'true');
   }
   apply();
+  track('filter', key);
 }));
 
 dayChips.forEach(chip => chip.addEventListener('click', () => {
   day = day === chip.dataset.day ? '' : chip.dataset.day;
   syncDayChips();
   apply();
+  track('day', day || 'both');
 }));
 
 if (district) {
-  district.addEventListener('change', apply);
+  district.addEventListener('change', () => {
+// Клик по афише и по «Билеты и подробности» — главный признак того, что
+// событие заинтересовало и человек ушёл к организатору.
+document.querySelectorAll('.card__link').forEach(link => {
+  link.addEventListener('click', () => track('click-card'));
+});
+document.querySelectorAll('.card__media').forEach(link => {
+  link.addEventListener('click', () => track('click-poster'));
+});
+document.querySelectorAll('.card__report').forEach(link => {
+  link.addEventListener('click', () => track('report'));
+});
+
+apply();
+    track('district', district.value || 'all');
+  });
 }
 
 document.querySelectorAll('[data-reset]').forEach(btn => btn.addEventListener('click', () => {
