@@ -1,3 +1,59 @@
+# Открыто всем: сайт некоммерческий, скрывать нечего.
+
 User-agent: *
 Allow: /
-Sitemap: https://plany-na-vyhodnye.ru/sitemap.xml
+
+# Поисковые роботы
+User-agent: YandexBot
+Allow: /
+
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: Mail.RU_Bot
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+# Роботы ИИ-сервисов: читать и цитировать можно
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: meta-externalagent
+Allow: /
+
+User-agent: Amazonbot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+Sitemap: https://photoalisa.github.io/plany-na-vyhodnye/sitemap.xml
