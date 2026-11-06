@@ -1,0 +1,86 @@
+name: Парсинг афиши
+
+# Расписание по Новосибирску (UTC+7, в cron часы сдвинуты на -7):
+#   понедельник 05:00 — собрать события на предстоящие субботу и воскресенье;
+#   пятница     05:00 — перепроверить: снять отменённое, добавить новое.
+# Публикация сайта идёт отдельным workflow через 4 часа — чтобы успеть
+# посмотреть таблицу и поправить карточки руками.
+on:
+  schedule:
+    - cron: "0 22 * * 0"   # понедельник 05:00 НСК
+    - cron: "0 22 * * 4"   # пятница    05:00 НСК
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: parse
+  cancel-in-progress: false
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Код
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Зависимости
+        run: pip install -r requirements.txt
+
+      - name: Ключ Google
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          if [ -z "$GOOGLE_CREDENTIALS" ]; then
+            echo "::error::Не задан секрет GOOGLE_CREDENTIALS"
+            exit 1
+          fi
+          printf '%s' "$GOOGLE_CREDENTIALS" > credentials.json
+
+      - name: Браузер для МЕГИ
+        continue-on-error: true
+        run: python -m playwright install --with-deps chromium
+
+      - name: Сбор событий в таблицу
+        run: python parser_main.py | tee parse.log
+
+      - name: Какие источники ответили
+        if: always()
+        run: |
+          if [ ! -f out/summary.json ]; then
+            echo "::warning::Парсер не отдал out/summary.json — проверьте parse.log"
+            exit 0
+          fi
+          python - <<'PY'
+          import json
+          import pathlib
+
+          data = json.loads(pathlib.Path("out/summary.json").read_text(encoding="utf-8"))
+          print(f'Источников: {len(data["sources"])}, событий: {data["total_valid"]}')
+          for src in data["sources"]:
+              flag = "ПУСТО" if src["raw"] == 0 else ("ошибки" if src["errors"] else "ok")
+              print(f'  {src["source"]:26} найдено {src["raw"]:3}  годных {src["valid"]:3}  {flag}')
+          empty = [s["source"] for s in data["sources"] if s["raw"] == 0]
+          if empty:
+              print(f'::warning::Пусто ответили: {", ".join(empty)}')
+          PY
+
+      - name: Сохранить итоги
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parse-report
+          path: |
+            out/summary.json
+            out/nsk_weekend.csv
+            parse.log
+          retention-days: 14
+          if-no-files-found: warn
