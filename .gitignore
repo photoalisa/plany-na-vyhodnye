@@ -1,0 +1,21 @@
+# Служебное: результаты прогонов, кэш страниц, собранный сайт.
+out/
+.cache/
+dist/
+dist_pages/
+public/
+*.log
+
+# Секреты: ключ сервисного аккаунта Google в репозиторий не попадает.
+credentials.json
+*.json.key
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Локальные снимки и инструменты редактора
+data/*.csv
+.gigatool/
