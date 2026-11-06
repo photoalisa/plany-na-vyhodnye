@@ -1,0 +1,64 @@
+name: Тестовый парсинг (без записи в таблицу)
+
+# Запускается только руками: Actions → «Тестовый парсинг» → Run workflow.
+# Нужен, чтобы понять, какие источники отвечают с зарубежных серверов GitHub.
+# Работает в режиме --csv: ничего не пишет в Google-таблицу.
+on:
+  workflow_dispatch:
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Код
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Зависимости
+        run: pip install -r requirements.txt
+
+      - name: Браузер для МЕГИ
+        continue-on-error: true
+        run: python -m playwright install --with-deps chromium
+
+      - name: Парсинг в CSV
+        continue-on-error: true
+        run: python parser_main.py --csv
+
+      - name: Таблица по источникам
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import pathlib
+
+          path = pathlib.Path("out/summary.json")
+          if not path.exists():
+              print("Парсер не отдал out/summary.json")
+              raise SystemExit(0)
+          data = json.loads(path.read_text(encoding="utf-8"))
+          print(f'Источников: {len(data["sources"])}, событий: {data["total_valid"]}')
+          for src in data["sources"]:
+              flag = "ПУСТО" if src["raw"] == 0 else ("ошибки" if src["errors"] else "ok")
+              print(f'  {src["source"]:26} найдено {src["raw"]:3}  годных {src["valid"]:3}  {flag}')
+          empty = [s["source"] for s in data["sources"] if s["raw"] == 0]
+          if empty:
+              print(f'Источники без ответа: {", ".join(empty)}')
+          PY
+
+      - name: Сохранить итоги
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parse-report
+          path: |
+            out/summary.json
+            out/nsk_weekend.csv
+            parse.log
+          if-no-files-found: warn

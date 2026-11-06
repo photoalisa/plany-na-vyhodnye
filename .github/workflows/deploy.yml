@@ -1,0 +1,86 @@
+name: Публикация сайта
+
+# Читает Google-таблицу и выкладывает сайт. Парсер здесь не запускается:
+# события к этому моменту уже собраны workflow «Парсинг афиши», а между
+# прогонами есть 4 часа, чтобы посмотреть таблицу и поправить карточки.
+#
+# Расписание по Новосибирску (UTC+7, в cron часы сдвинуты на -7):
+#   понедельник 09:00 — публикация после утреннего парсинга;
+#   пятница     09:00 — публикация после пятничной проверки.
+# Кнопка «Run workflow» — опубликовать вручную в любой момент.
+on:
+  schedule:
+    - cron: "0 2 * * 1"   # понедельник 09:00 НСК
+    - cron: "0 2 * * 5"   # пятница    09:00 НСК
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Код
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Зависимости
+        run: pip install -r requirements.txt
+
+      - name: Ключ Google
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          if [ -z "$GOOGLE_CREDENTIALS" ]; then
+            echo "::error::Не задан секрет GOOGLE_CREDENTIALS"
+            exit 1
+          fi
+          printf '%s' "$GOOGLE_CREDENTIALS" > credentials.json
+
+      - name: Сборка из таблицы
+        run: |
+          python scripts/build_site.py \
+            --out public \
+            --base /plany-na-vyhodnye/ \
+            --sheet | tee build.log
+
+      - name: Проверка, что события на месте
+        run: |
+          count=$(grep -oP 'событий на выходные \K\d+' build.log | tail -1 || echo 0)
+          echo "Событий на выходные: ${count}"
+          if [ "${count:-0}" -lt 20 ]; then
+            echo "::error::Событий меньше 20 — публикацию останавливаю, чтобы не выложить пустой каталог"
+            exit 1
+          fi
+
+      - name: Подготовка Pages
+        uses: actions/configure-pages@v5
+
+      - name: Артефакт
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Публикация
+        id: deployment
+        uses: actions/deploy-pages@v4
