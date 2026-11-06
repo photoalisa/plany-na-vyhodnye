@@ -39,6 +39,35 @@ select{border:1px solid var(--line);background:transparent;color:var(--ink);bord
 .card__link:hover{text-decoration:underline}
 .card__report{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;margin-top:2px}
 .card__report:hover{text-decoration:underline}
+/* прошедшее событие: видно, что оно было, но не путается с актуальным */
+.card--past{opacity:.55}
+.card--past .card__meta::after{content:" · уже прошло";color:var(--muted)}
+.past{margin:20px 0 0;font-size:14px;color:var(--muted)}
+.past .chip{margin-left:8px;font-size:13px;padding:5px 12px}
 .empty{display:none;padding:40px 0;color:var(--muted)}
 footer{margin-top:32px;color:var(--muted);font-size:13px}
 @media (max-width:640px){.grid{grid-template-columns:1fr}h1{font-size:24px}}
+/* Статьи: узкая колонка для чтения, живой блок событий и перелинковка */
+.crumbs{margin:18px 0 0;font-size:14px;color:var(--muted)}
+.crumbs a{color:var(--muted)}
+.article{max-width:70ch;margin-top:8px}
+.article h1{font-size:30px;line-height:1.2;margin:18px 0 8px}
+.article__meta{margin:0 0 18px;font-size:14px;color:var(--muted)}
+.article h2{font-size:22px;margin:30px 0 10px}
+.article h3{font-size:18px;margin:24px 0 8px}
+.article p{font-size:17px;line-height:1.6;margin:0 0 14px}
+.article ul,.article ol{margin:0 0 16px;padding-left:22px;font-size:17px;line-height:1.6}
+.article li{margin:0 0 8px}
+.article a{color:var(--accent)}
+.article__live{margin:32px 0 8px;padding:18px 20px;border:1px solid var(--line);border-radius:14px;background:var(--chip)}
+.article__live h2{font-size:18px;margin:0 0 10px}
+.article__live ul{margin:0 0 10px;font-size:15px;line-height:1.45}
+.article__live a{font-weight:600}
+.article__related{margin:32px 0 0;padding-top:18px;border-top:1px solid var(--line)}
+.article__related h2{font-size:18px;margin:0 0 10px}
+.article__related ul{list-style:none;padding:0;font-size:16px}
+.statyi{list-style:none;padding:0;margin:26px 0 0;max-width:70ch}
+.statyi li{padding:16px 0;border-bottom:1px solid var(--line)}
+.statyi a{font-size:19px;font-weight:600;color:var(--ink);text-decoration:none}
+.statyi a:hover{color:var(--accent)}
+.statyi p{margin:6px 0 0;font-size:15px;color:var(--muted)}
