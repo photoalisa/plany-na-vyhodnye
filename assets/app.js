@@ -6,8 +6,19 @@ const dayChips = [...document.querySelectorAll('.chip[data-day]')];
 // Список площадок: на каталоге это районы города, на «За городом» —
 // населённые пункты области. Скрипт один, поэтому ключ берём из data-zone.
 const zone = document.querySelector('#district, #geo');
-const zoneKey = zone ? (zone.dataset.zone || 'district') : '';
-const zoneParam = zoneKey === 'geo' ? 'geo' : 'district';
+// Значение опции: «d:Центральный» — район города, «g:Искитим» — город
+// области. Старые ссылки без префикса считаем районом.
+function zoneOf(value){
+  const raw = value || '';
+  const cut = raw.indexOf(':');
+  if (cut > 0){
+    const prefix = raw.slice(0, cut);
+    if (prefix === 'd' || prefix === 'g'){
+      return {field: prefix === 'g' ? 'geo' : 'district', name: raw.slice(cut + 1)};
+    }
+  }
+  return {field: 'district', name: raw};
+}
 const pastNote = document.querySelector('[data-past]');
 const pastToggle = document.querySelector('[data-past-toggle]');
 const counter = document.querySelector('[data-count]');
@@ -43,7 +54,14 @@ function syncDayChips(){
 }
 syncDayChips();
 
-if (zone && params.get(zoneParam)) zone.value = params.get(zoneParam);
+if (zone){
+  const wanted = params.get('district') || params.get('geo') || '';
+  if (wanted){
+    const values = [...zone.options].map(o => o.value);
+    const match = [wanted, 'd:' + wanted, 'g:' + wanted].find(v => values.includes(v));
+    if (match) zone.value = match;
+  }
+}
 
 function plural(n){
   const m = n % 100, d = n % 10;
@@ -59,7 +77,7 @@ function syncUrl(){
   });
   if (day) params.set('day', day); else params.delete('day');
   const z = zone ? zone.value : '';
-  if (z) params.set(zoneParam, z); else params.delete(zoneParam);
+  if (z) params.set('district', z); else params.delete('district');
   const q = params.toString();
   const next = q ? '?' + q : location.pathname;
   // apply() вызывается ещё и по таймеру: без сравнения адрес переписывался бы
@@ -85,10 +103,11 @@ function updatePast(past){
 
 function apply(){
   const z = zone ? zone.value : '';
+  const zoneSel = zoneOf(z);
   let shown = 0, past = 0;
   for (const card of cards){
     const okFlags = [...active].every(k => card.dataset[k] === 'true');
-    const okZone = !z || (card.dataset[zoneKey] || '') === z;
+    const okZone = !z || (card.dataset[zoneSel.field] || '') === zoneSel.name;
     const okDay = !day || (card.dataset.days || '').split(' ').includes(day);
     const matches = okFlags && okZone && okDay;
     const gone = matches && isPast(card);
