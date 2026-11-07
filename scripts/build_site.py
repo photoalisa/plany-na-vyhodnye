@@ -501,8 +501,15 @@ def json_ld(events: list[dict], page_name: str) -> str:
                 "address": {"@type": "PostalAddress", "addressLocality": ev["area"],
                             "streetAddress": ev["address"]},
             }
-        if ev["venue"]:
-            item["organizer"] = {"@type": "Organization", "name": ev["venue"]}
+        else:
+            item["location"] = {
+                "@type": "Place",
+                "name": ev["area"] or "Новосибирск",
+                "address": {"@type": "PostalAddress", "addressLocality": "Новосибирск"},
+            }
+        org_name = ev["venue"] or ev["source"]
+        if org_name:
+            item["organizer"] = {"@type": "Organization", "name": org_name}
         offer = _offers(ev)
         if offer:
             item["offers"] = offer
