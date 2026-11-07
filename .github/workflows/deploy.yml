@@ -9,6 +9,14 @@ name: Публикация сайта
 #   пятница     09:00 — публикация после пятничной проверки.
 # Кнопка «Run workflow» — опубликовать вручную в любой момент.
 on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - "common/**"
+      - "static/**"
+      - "articles/**"
+      - ".github/workflows/**"
   schedule:
     - cron: "0 2 * * 1"   # понедельник 09:00 НСК
     - cron: "0 2 * * 5"   # пятница    09:00 НСК
