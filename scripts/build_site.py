@@ -451,6 +451,34 @@ def zone_select_html(events: list[dict], geo: bool = False) -> str:
 
 
 def json_ld(events: list[dict], page_name: str) -> str:
+    def _offers(ev: dict):
+        import re as _re
+
+        common = {
+            "priceCurrency": "RUB",
+            "availability": "https://schema.org/InStock",
+            "url": ev["url"],
+        }
+        if ev["flags"]["free"]:
+            return {"@type": "Offer", "price": 0, **common}
+        raw = ev["price"]
+        if not raw:
+            return None
+        nums = []
+        for chunk in _re.findall(r"\d[\d\s]{0,6}", raw):
+            digits = _re.sub(r"\D", "", chunk)
+            if not digits:
+                continue
+            value = int(digits)
+            if 0 < value < 100000:
+                nums.append(value)
+        if not nums:
+            return None
+        is_range = len(nums) >= 2 and (_re.search(r"[–—]", raw) or " до " in raw.lower())
+        if is_range:
+            return {"@type": "AggregateOffer", "lowPrice": min(nums), "highPrice": max(nums), **common}
+        return {"@type": "Offer", "price": nums[0], **common}
+
     items = []
     for ev in events[:20]:
         item = {
@@ -458,11 +486,14 @@ def json_ld(events: list[dict], page_name: str) -> str:
             "name": ev["title"],
             "url": ev["url"],
             "eventAttendanceMode": "https://schema.org/OfflineEventAttendanceMode",
+            "eventStatus": "https://schema.org/EventScheduled",
         }
         if ev["start"]:
             item["startDate"] = ev["start"].isoformat() + (f"T{ev['time']}" if ev["time"] else "")
         if ev["end"]:
             item["endDate"] = ev["end"].isoformat()
+        if ev["text"]:
+            item["description"] = cut_text(ev["text"], 240)
         if ev["venue"] or ev["address"]:
             item["location"] = {
                 "@type": "Place",
@@ -470,6 +501,11 @@ def json_ld(events: list[dict], page_name: str) -> str:
                 "address": {"@type": "PostalAddress", "addressLocality": ev["area"],
                             "streetAddress": ev["address"]},
             }
+        if ev["venue"]:
+            item["organizer"] = {"@type": "Organization", "name": ev["venue"]}
+        offer = _offers(ev)
+        if offer:
+            item["offers"] = offer
         if ev["image"]:
             item["image"] = ev["image"]
         items.append(item)
