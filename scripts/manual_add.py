@@ -41,7 +41,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from common import model, sheets  # noqa: E402
+from common import http, model, sheets  # noqa: E402
 
 MANUAL_DIR = ROOT / "content" / "manual"
 
@@ -90,6 +90,42 @@ def apply_price_guard(ev: dict) -> dict:
     return ev
 
 
+_OG_IMAGE = re.compile(
+    r'property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']', re.IGNORECASE
+)
+
+
+def og_image(url: str) -> str:
+    """Афиша со страницы события: og:image. У ВК её нет, там ссылка бесполезна."""
+    if not url.startswith("http"):
+        return ""
+    html = http.get_text(url, ttl=24 * 3600)
+    if not html:
+        return ""
+    match = _OG_IMAGE.search(html) or re.search(
+        r'content=["\']([^"\']+)["\'][^>]*property=["\']og:image["\']', html, re.IGNORECASE
+    )
+    return match.group(1).strip() if match else ""
+
+
+def ensure_image(ev: dict) -> dict:
+    """Картинка для карточки: своя из файла или og:image со страницы события.
+
+    Без этого ручные события приходили с заглушкой: в тексте анонса картинки
+    нет, а обложку никто не искал.
+    """
+    image = (ev.get("image_url") or "").strip()
+    if not image:
+        image = og_image(ev.get("source_url") or "")
+    if image and http.image_ok(image):
+        ev["image_url"] = image
+        ev["image_ok"] = True
+    else:
+        ev["image_url"] = ""
+        ev["image_ok"] = False
+    return ev
+
+
 def split_when(line: str) -> tuple[str, str, str]:
     """«14 ноября, 10:00» → («14 ноября», «10:00», хвост после тире)."""
     match = _WHEN.match(line.strip())
@@ -129,9 +165,19 @@ def parse_header(line: str) -> dict[str, str]:
 
 
 def read_announcement(raw: str, source: str) -> list[dict]:
-    """Анонс с афиши: шапка + блоки «📅 дата, время → название → описание»."""
+    """Анонс с афиши: шапка + блоки «📅 дата, время → название → описание».
+
+    Над первым блоком можно добавить строки вида «image: https://…» — они
+    читаются как обычные поля и применяются ко всем событиям файла.
+    """
     parts = raw.split(DATE_MARK)
-    header = parse_header(parts[0])
+    header_lines = [line.strip() for line in parts[0].splitlines() if line.strip()]
+    header = parse_header(header_lines[0]) if header_lines else {}
+    for extra in header_lines[1:]:
+        match = re.match(r"^([^:]{1,24}):\s*(.+)$", extra)
+        key = ALIASES.get(match.group(1).strip().lower()) if match else None
+        if key:
+            header[key] = match.group(2).strip()
     events: list[dict] = []
     for part in parts[1:]:
         lines = [line.strip() for line in part.strip().splitlines() if line.strip()]
@@ -142,6 +188,17 @@ def read_announcement(raw: str, source: str) -> list[dict]:
         title = tail or (rest.pop(0) if rest else "")
         if not title:
             continue
+        # Отдельная афиша для одного события: строка «image: https://…»
+        # внутри блока важнее общей картинки файла.
+        image = header.get("image_url", "")
+        kept: list[str] = []
+        for line in rest:
+            match = re.match(r"^(?:image|картинка|афиша)\s*:\s*(\S+)$", line, re.IGNORECASE)
+            if match:
+                image = match.group(1).strip()
+                continue
+            kept.append(line)
+        rest = kept
         age = _AGE.search(title)
         age_text = age.group(1) if age else ""
         if age:
@@ -156,10 +213,12 @@ def read_announcement(raw: str, source: str) -> list[dict]:
             district=header.get("district", ""),
             price_text=header.get("price_text", ""),
             source_url=header.get("source_url", ""),
+            image_url=image,
+            category=header.get("category", ""),
             text_raw="\n".join(rest) or title,
             age_text=age_text,
         ))
-        events[-1] = apply_price_guard(events[-1])
+        events[-1] = ensure_image(apply_price_guard(events[-1]))
     return events
 
 
@@ -210,7 +269,7 @@ def read_file(path: Path, source: str) -> list[dict]:
             age_text=fields.get("age_text", ""),
             kind_hint=fields.get("kind_hint", ""),
         ))
-        events[-1] = apply_price_guard(events[-1])
+        events[-1] = ensure_image(apply_price_guard(events[-1]))
     return events
 
 
@@ -234,7 +293,7 @@ def describe(ev: dict) -> str:
     flags = [name for name in ("is_free", "is_child_ok", "is_dog_ok", "is_nature")
              if ev.get(name)]
     bits = [when, ev["time_text"], ev["venue"] or ev["address"], ev["price_text"],
-            ", ".join(flags)]
+            "фото есть" if ev.get("image_ok") else "без фото", ", ".join(flags)]
     return " · ".join(bit for bit in bits if bit)
 
 
