@@ -52,6 +52,16 @@ jobs:
       - name: Сбор событий в таблицу
         run: python parser_main.py | tee parse.log
 
+      - name: Ручные события из текстов
+        if: always()
+        run: |
+          count=$(find content/manual -maxdepth 1 -name '*.txt' ! -name '_*' 2>/dev/null | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "В content/manual нет текстов — пропускаю"
+            exit 0
+          fi
+          python scripts/manual_add.py
+
       - name: Какие источники ответили
         if: always()
         run: |

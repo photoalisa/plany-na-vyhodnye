@@ -1,0 +1,69 @@
+name: Ручные события
+
+# События, которых нет в машинных источниках (например, парки и музеи, которые
+# публикуют расписание картинками или только во «ВКонтакте»). Текст анонса
+# лежит в content/manual/*.txt — этот workflow разбирает файлы и дописывает
+# строки в таблицу.
+#
+# Запускается сам при загрузке нового текста в content/manual, а также по
+# кнопке Run workflow. Публикация сайта идёт отдельным workflow, поэтому в
+# конце мы просим её пересобрать.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "content/manual/**"
+      - "scripts/manual_add.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: manual
+  cancel-in-progress: false
+
+jobs:
+  add:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Код
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Зависимости
+        run: pip install -r requirements.txt
+
+      - name: Ключ Google
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          if [ -z "$GOOGLE_CREDENTIALS" ]; then
+            echo "::error::Не задан секрет GOOGLE_CREDENTIALS"
+            exit 1
+          fi
+          printf '%s' "$GOOGLE_CREDENTIALS" > credentials.json
+
+      - name: Добавление событий
+        run: |
+          count=$(find content/manual -maxdepth 1 -name '*.txt' ! -name '_*' 2>/dev/null | wc -l)
+          echo "Текстов в content/manual: $count"
+          if [ "$count" -eq 0 ]; then
+            echo "Добавлять нечего"
+            exit 0
+          fi
+          python scripts/manual_add.py
+
+      - name: Пересобрать сайт
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run deploy.yml --repo "$GITHUB_REPOSITORY"
