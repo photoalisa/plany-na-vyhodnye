@@ -28,7 +28,7 @@ import json
 import re
 import shutil
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -638,10 +638,18 @@ def footer_html(articles_link: bool = False) -> str:
 def page_html(*, title: str, description: str, lead: str, events: list[dict],
               all_events: list[dict], path: str, active_filter: str = "",
               h1: str = "", show_filters: bool = True, canonical: str = "",
-              noindex: bool = False, geo_select: bool = False) -> str:
+              noindex: bool = False, geo_select: bool = False,
+              release: datetime | None = None) -> str:
     cards = "\n".join(card_html(ev) for ev in events)
     canonical_url = f"{SITE_URL}/{path}".rstrip("/") + ("/" if path else "/")
     canonical_url = canonical or canonical_url
+
+    release_html = ""
+    if release is not None:
+        release_html = (
+            f'  <p class="release"><time datetime="{release.date().isoformat()}">'
+            f"{esc(release_label(release))}</time></p>\n"
+        )
 
     controls = ""
     if show_filters:
@@ -689,7 +697,7 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
 
   <h1>{esc(h1 or title)}</h1>
   <p class="lead">{esc(lead)}</p>
-
+{release_html}
   {controls}
 
   <div class="grid">{cards}</div>
@@ -716,6 +724,25 @@ def weekend_label() -> str:
     if sat.month == sun.month:
         return f"{sat.day}–{sun.day} {MONTHS[sun.month - 1]}"
     return f"{sat.day} {MONTHS[sat.month - 1]} – {sun.day} {MONTHS[sun.month - 1]}"
+
+
+def now_nsk() -> datetime:
+    """Текущее время в Новосибирске.
+
+    В Windows нет системной базы часовых поясов, поэтому zoneinfo может
+    упасть; тогда берём фиксированный сдвиг UTC+7 — летнего времени в
+    Новосибирске нет с 2014 года, разница круглый год одна.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Novosibirsk")).replace(tzinfo=None)
+    except Exception:
+        return datetime.now(timezone(timedelta(hours=7))).replace(tzinfo=None)
+
+
+def release_label(moment: datetime) -> str:
+    """«Выпуск от 9 ноября» — дата, на которую собран каталог."""
+    return f"Выпуск от {moment.day} {MONTHS[moment.month - 1]}"
 
 
 def human_date(iso: str) -> str:
@@ -905,6 +932,7 @@ def build(rows: list[dict], out: Path, today: date, base: str = "",
     CURRENT_WEEKEND = weekend_of(today)
     ARTICLES = articles_store.load_articles(ROOT / "content" / "articles")
     sat, sun = CURRENT_WEEKEND
+    release = now_nsk()
     base = base.rstrip("/")
 
     events = [e for e in events_from_rows(rows) if on_weekend(e, sat, sun)]
@@ -980,6 +1008,7 @@ def build(rows: list[dict], out: Path, today: date, base: str = "",
         lead="Выставки, лекции, концерты и прогулки.",
         events=events, all_events=events, path="",
         h1="Куда пойти на выходных",
+        release=release,
     ))
 
     indexable: list[str] = []
@@ -992,6 +1021,7 @@ def build(rows: list[dict], out: Path, today: date, base: str = "",
             events=subset, all_events=events, path=f"{slug}/",
             active_filter=key, h1=title,
             geo_select=key == "outside",
+            release=release,
             # пустую страницу не отдаём поисковикам: она ничего не даёт пользователю
             noindex=not subset,
         ))
@@ -1071,6 +1101,8 @@ header.top{display:flex;justify-content:space-between;align-items:baseline;gap:1
 h1{font-size:28px;line-height:1.2;margin:28px 0 6px}
 h2{font-size:20px;margin:32px 0 12px}
 .lead{color:var(--muted);margin:0 0 22px;max-width:62ch}
+.release{color:var(--muted);font-size:13px;margin:-14px 0 18px}
+.release time{font-variant-numeric:tabular-nums}
 .controls{position:sticky;top:0;background:var(--bg);padding:12px 0;z-index:5;
   display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--line)}
 .chip{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
