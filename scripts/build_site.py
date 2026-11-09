@@ -365,7 +365,8 @@ def card_html(ev: dict, weekend: bool = True) -> str:
     # Возрастная маркировка (436-ФЗ) — рядом с ценой, чтобы была видна сразу.
     if ev.get("age"):
         price = f"{price} · {ev['age']}"
-    link_label = "Подробнее →" if ev["flags"]["free"] else "Билеты и подробности →"
+    link_label = ("Подробнее <span aria-hidden=\"true\">→</span>" if ev["flags"]["free"]
+                  else "Билеты и подробности <span aria-hidden=\"true\">→</span>")
     return f"""
 <article class="card" {attrs}{day_attr}{end_attr} data-district="{esc(ev['district'])}" data-geo="{esc(ev['area'])}">
   <a class="card__media" href="{esc(ev['url'])}" target="_blank" rel="noopener nofollow">
@@ -373,7 +374,7 @@ def card_html(ev: dict, weekend: bool = True) -> str:
   </a>
   <div class="card__body">
     <p class="card__meta">{esc(' · '.join(meta))}</p>
-    <h2 class="card__title">{esc(ev['title'])}</h2>
+    <h3 class="card__title">{esc(ev['title'])}</h3>
     <p class="card__text">{esc(cut_text(ev['text']))}</p>
     <p class="card__price">{esc(price)}</p>
     <a class="card__link" href="{esc(ev['url'])}" target="_blank" rel="noopener nofollow">{link_label}</a>
@@ -398,9 +399,9 @@ def chips_html(active: str = "", events: list[dict] | None = None) -> str:
             if not any(ev["flags"].get(key) for ev in events):
                 continue
         extra = " chip--free" if key == "free" else ""
+        current = ' aria-current="page"' if key == active else ""
         buttons.append(
-            f'<a class="chip{extra}" href="/{slug}/" data-filter="{key}" '
-            f'aria-pressed="{"true" if key == active else "false"}">{label}</a>'
+            f'<a class="chip{extra}" href="/{slug}/" data-filter="{key}"{current}>{label}</a>'
         )
     return "".join(buttons)
 
@@ -644,6 +645,7 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
     canonical_url = f"{SITE_URL}/{path}".rstrip("/") + ("/" if path else "/")
     canonical_url = canonical or canonical_url
 
+    sr_heading = '  <h2 class="sr-only">События</h2>\n' if events else ""
     release_html = ""
     if release is not None:
         release_html = (
@@ -660,7 +662,8 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
             + chips_html(active_filter, all_events)
             + zone_select_html(all_events, geo_select)
             + '<button class="chip" data-reset>Сбросить</button>'
-            + f'<span class="count"><span data-count>{len(events)}</span></span>'
+            + f'<span class="count" role="status" aria-live="polite" aria-atomic="true">'
+              f'<span data-count>{len(events)}</span></span>'
             + "</div>"
         )
 
@@ -689,18 +692,20 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
 <script type="application/ld+json">{json_ld(events, title)}</script>
 </head>
 <body>
+<a class="skip-link" href="#events">Перейти к содержимому</a>
 <div class="wrap">
   <header class="top">
     <a class="brand" href="/">{esc(SITE_NAME)}</a>
     <span class="weekend">{esc(weekend_label())}</span>
   </header>
 
+  <main id="events">
   <h1>{esc(h1 or title)}</h1>
   <p class="lead">{esc(lead)}</p>
 {release_html}
   {controls}
 
-  <div class="grid">{cards}</div>
+{sr_heading}  <div class="grid">{cards}</div>
 
   <p class="past" data-past hidden>
     <span data-past-label>Прошедшие события скрыты.</span>
@@ -710,6 +715,7 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
   <p class="empty">По этим фильтрам на выходные ничего нет.
     <button class="chip" data-reset>Сбросить фильтры</button>
   </p>
+  </main>
 
   {footer_html(articles_link=bool(ARTICLES))}
 </div>
@@ -857,6 +863,7 @@ def article_page_html(article, events: list[dict], others: list) -> str:
 <script type="application/ld+json">{article_json_ld(article)}</script>
 </head>
 <body>
+<a class="skip-link" href="#content">Перейти к тексту</a>
 <div class="wrap">
   <header class="top">
     <a class="brand" href="/">{esc(SITE_NAME)}</a>
@@ -865,6 +872,7 @@ def article_page_html(article, events: list[dict], others: list) -> str:
 
   <nav class="crumbs"><a href="/">Главная</a> · <a href="/statyi/">Статьи</a></nav>
 
+  <main id="content">
   <article class="article">
     <h1>{esc(article.h1)}</h1>
     {meta}
@@ -872,6 +880,7 @@ def article_page_html(article, events: list[dict], others: list) -> str:
     {live}
     {related_html}
   </article>
+  </main>
 
   {footer_html(articles_link=True)}
 </div>
@@ -906,6 +915,7 @@ def statyi_index_html(articles: list) -> str:
 <link rel="icon" href="/placeholder.svg" type="image/svg+xml">
 </head>
 <body>
+<a class="skip-link" href="#content">Перейти к статьям</a>
 <div class="wrap">
   <header class="top">
     <a class="brand" href="/">{esc(SITE_NAME)}</a>
@@ -914,9 +924,11 @@ def statyi_index_html(articles: list) -> str:
 
   <nav class="crumbs"><a href="/">Главная</a> · Статьи</nav>
 
+  <main id="content">
   <h1>Статьи</h1>
   <p class="lead">Как выбрать событие, а не листать двадцать вкладок.</p>
   <ul class="statyi">{items}</ul>
+  </main>
 
   {footer_html(articles_link=False)}
 </div>
@@ -1093,6 +1105,13 @@ CSS = """
 @media (prefers-color-scheme:dark){:root{--bg:#14110F;--ink:#F3EFE7;--muted:#A79E93;--accent:#7FC7A8;--chip:#242019;--line:#2E2822}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,"Segoe UI",Roboto,sans-serif}
+.skip-link{position:absolute;left:-9999px;top:0;z-index:100;background:var(--accent);color:#fff;
+  padding:10px 18px;border-radius:0 0 10px 0;font-size:14px;font-weight:600;text-decoration:none}
+.skip-link:focus{left:0}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;border:0}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.chip:focus-visible,a.chip:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .wrap{max-width:1120px;margin:0 auto;padding:24px 20px 64px}
 header.top{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;
   border-bottom:1px solid var(--line);padding-bottom:16px}
@@ -1108,9 +1127,9 @@ h2{font-size:20px;margin:32px 0 12px}
 .chip{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
   padding:7px 14px;font-size:14px;cursor:pointer;font-family:inherit}
 a.chip{display:inline-flex;align-items:center;text-decoration:none}
-.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.chip[aria-pressed="true"],.chip[aria-current="page"]{background:var(--accent);border-color:var(--accent);color:#fff}
 .chip--free{border-color:var(--accent);color:var(--accent);font-weight:600}
-.chip--free[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.chip--free[aria-pressed="true"],.chip--free[aria-current="page"]{background:var(--accent);border-color:var(--accent);color:#fff}
 .controls__divider{width:1px;height:22px;background:var(--line);margin:0 4px}
 select{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
   padding:7px 12px;font-size:14px;font-family:inherit}
@@ -1208,9 +1227,9 @@ function track(action, label){
 const active = new Set();
 chips.forEach(chip => {
   const key = chip.dataset.filter;
-  if (params.get(key) === '1' || chip.getAttribute('aria-pressed') === 'true') {
+  if (params.get(key) === '1' || chip.getAttribute('aria-current') === 'page') {
     active.add(key);
-    chip.setAttribute('aria-pressed', 'true');
+    chip.setAttribute('aria-current', 'page');
   }
 });
 
@@ -1298,10 +1317,10 @@ chips.forEach(chip => chip.addEventListener('click', (e) => {
   const key = chip.dataset.filter;
   if (active.has(key)){
     active.delete(key);
-    chip.setAttribute('aria-pressed', 'false');
+    chip.removeAttribute('aria-current');
   } else {
     active.add(key);
-    chip.setAttribute('aria-pressed', 'true');
+    chip.setAttribute('aria-current', 'page');
   }
   apply();
   track('filter', key);
@@ -1358,7 +1377,7 @@ document.querySelectorAll('[data-reset]').forEach(btn => btn.addEventListener('c
   active.clear();
   day = '';
   showPast = false;
-  chips.forEach(chip => chip.setAttribute('aria-pressed', 'false'));
+  chips.forEach(chip => chip.removeAttribute('aria-current'));
   syncDayChips();
   if (zone) zone.value = '';
   apply();
