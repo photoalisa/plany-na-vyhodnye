@@ -477,7 +477,10 @@ def read_table(name: str = SHEET_NAME, creds: str = CREDENTIALS,
     header = [str(h).strip() for h in values[0]]
     rows: list[dict] = []
     for row in values[1:]:
-        if not row or not str(row[0]).strip():
+        # Пропускаем только полностью пустые строки. Раньше здесь проверялась
+        # первая ячейка (id), и события, добавленные руками без id, молча
+        # выпадали из сборки: на сайте их не было, хотя в таблице они лежали.
+        if not row or not any(str(cell).strip() for cell in row):
             continue
         rows.append({
             header[i]: (row[i] if i < len(row) else "")
