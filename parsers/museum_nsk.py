@@ -28,6 +28,14 @@ _MONTHS = (
     "сентября|октября|ноября|декабря"
 )
 _RE_UNTIL = re.compile(rf"до\s+(\d{{1,2}}\s+(?:{_MONTHS})(?:\s+\d{{4}})?)", re.IGNORECASE)
+_RE_ADDRESS = re.compile(
+    r"по\s+адресу\s+([А-ЯЁа-яё0-9][^.;!?]{2,60}?,\s*\d+[А-Яа-яA-Za-z0-9/\-]*)",
+    re.IGNORECASE,
+)
+# Филиалы музея: по адресу понятно, в каком здании идёт выставка.
+_BRANCHES = {
+    "обская": "Музей на набережной",
+}
 
 
 def _card_title(card) -> str:
@@ -98,6 +106,27 @@ def _find_until(soup) -> str:
     return (with_year or candidates)[0] if candidates else ""
 
 
+def _place(soup) -> tuple[str, str]:
+    """Адрес и филиал из текста страницы: «работает по адресу Обская, 4».
+
+    У музея один сайт на все филиалы, и выставки идут в разных зданиях.
+    Раньше всем карточкам подставлялся адрес главного здания на Советской,
+    из-за чего выставка на набережной показывалась не по тому адресу.
+    """
+    blob = soup.get_text(" ", strip=True)
+    match = _RE_ADDRESS.search(blob)
+    if not match:
+        return "ул. Советская, 24", "Музей Новосибирска"
+
+    raw = match.group(1).strip().rstrip(".")
+    venue = "Музей Новосибирска"
+    for pattern, name in _BRANCHES.items():
+        if pattern in raw.lower():
+            venue = name
+            break
+    return text.normalize_address(raw), venue
+
+
 def _detail(card: dict, today: date) -> dict | None:
     html = http.get_text(card["source_url"], ttl=24 * 3600)
     if not html:
@@ -128,6 +157,8 @@ def _detail(card: dict, today: date) -> dict | None:
     if og and og.get("content"):
         image_url = og["content"]
 
+    address, venue = _place(soup)
+
     return {
         "source": "Музей Новосибирска",
         "title": card["title"],
@@ -138,9 +169,8 @@ def _detail(card: dict, today: date) -> dict | None:
         "source_url": card["source_url"],
         "image_url": image_url,
         "text_raw": description or f"Выставка Музея Новосибирска: «{card['title']}». Работает до {until}.",
-        "venue": "Музей Новосибирска",
-        "address": "ул. Советская, 24",
-        "district": "Центральный",
+        "venue": venue,
+        "address": address,
         "tags": "выставки",
         "category": "выставка",
     }
