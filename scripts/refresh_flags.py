@@ -56,7 +56,9 @@ def main(argv=None) -> int:
     counts = {field: 0 for field in FIELDS}
 
     for row_number, row in enumerate(values[1:], start=2):
-        if not row or not str(row[0]).strip():
+        # Строки, добавленные руками, часто без id в первой колонке — их тоже
+        # нужно пересчитывать, поэтому пропускаем только пустые строки целиком.
+        if not row or not any(str(cell).strip() for cell in row):
             continue
 
         def cell(name: str) -> str:
