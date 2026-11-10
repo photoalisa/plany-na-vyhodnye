@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Планы на выходные">
+  <rect width="64" height="64" rx="13" fill="#1F5E4B"/>
+  <path d="M25.2 12.5h4.6l-1.4 30.4h-5.6z" fill="#FFFFFF"/>
+  <path d="M38.8 12.5h-4.6l1.4 30.4h5.6z" fill="#FFFFFF"/>
+  <rect x="20.6" y="23.8" width="22.8" height="3.8" fill="#FFFFFF"/>
+  <rect x="9" y="48.4" width="46" height="2.8" rx="1.4" fill="#FFFFFF"/>
+</svg>

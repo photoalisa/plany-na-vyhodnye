@@ -1,41 +1,85 @@
 
-:root{--bg:#FBFAF7;--ink:#14110F;--muted:#6B625A;--accent:#1F5E4B;--chip:#E8E2D6;--line:#E3DDD1}
-@media (prefers-color-scheme:dark){:root{--bg:#14110F;--ink:#F3EFE7;--muted:#A79E93;--accent:#7FC7A8;--chip:#242019;--line:#2E2822}}
+/* Шрифт лежит рядом с сайтом: без внешних запросов страница одинаково
+   выглядит и открывается быстрее — важно для мобильных на слабом сигнале. */
+@font-face{font-family:"Golos Text";font-style:normal;font-weight:400 900;font-display:swap;
+  src:url("fonts/golos-text-cyrillic.woff2") format("woff2");
+  unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+@font-face{font-family:"Golos Text";font-style:normal;font-weight:400 900;font-display:swap;
+  src:url("fonts/golos-text-latin.woff2") format("woff2");
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,
+  U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+:root{--bg:#FBFAF7;--ink:#14110F;--muted:#6B625A;--accent:#1F5E4B;--chip:#E8E2D6;--line:#E3DDD1;
+  --media-bg:#F1EEE7;
+  --font-display:"Golos Text",-apple-system,"Segoe UI",Roboto,sans-serif}
+@media (prefers-color-scheme:dark){:root{--bg:#14110F;--ink:#F3EFE7;--muted:#A79E93;--accent:#7FC7A8;
+  --chip:#242019;--line:#2E2822;--media-bg:#1F1B15}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,"Segoe UI",Roboto,sans-serif}
+h1,h2,h3,.brand__name,.card__title{font-family:var(--font-display)}
+.skip-link{position:absolute;left:-9999px;top:0;z-index:100;background:var(--accent);color:#fff;
+  padding:10px 18px;border-radius:0 0 10px 0;font-size:14px;font-weight:600;text-decoration:none}
+.skip-link:focus{left:0}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;border:0}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.chip:focus-visible,a.chip:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .wrap{max-width:1120px;margin:0 auto;padding:24px 20px 64px}
-header.top{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;
+header.top{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
   border-bottom:1px solid var(--line);padding-bottom:16px}
-.brand{font-weight:700;letter-spacing:.04em;text-transform:uppercase;font-size:14px;color:var(--ink);text-decoration:none}
-.weekend{color:var(--muted);font-size:14px}
+.brand{display:inline-flex;align-items:center;gap:11px;text-decoration:none;color:var(--ink)}
+.brand__mark{display:block;width:30px;height:30px;border-radius:7px}
+.brand__text{display:flex;flex-direction:column;gap:3px}
+.brand__name{font-size:16px;font-weight:600;letter-spacing:-.005em;line-height:1}
+.brand__city{font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--muted);line-height:1}
+.weekend{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
 h1{font-size:28px;line-height:1.2;margin:28px 0 6px}
 h2{font-size:20px;margin:32px 0 12px}
 .lead{color:var(--muted);margin:0 0 22px;max-width:62ch}
+.release{color:var(--muted);font-size:13px;margin:-14px 0 18px}
+.release time{font-variant-numeric:tabular-nums}
 .controls{position:sticky;top:0;background:var(--bg);padding:12px 0;z-index:5;
-  display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--line)}
+  display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)}
+.controls__row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .chip{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
   padding:7px 14px;font-size:14px;cursor:pointer;font-family:inherit}
 a.chip{display:inline-flex;align-items:center;text-decoration:none}
-.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
-.chip--free{border-color:var(--accent);color:var(--accent);font-weight:600}
-.chip--free[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
-.controls__divider{width:1px;height:22px;background:var(--line);margin:0 4px}
+.chip[aria-pressed="true"],.chip[aria-current="page"]{background:var(--accent);border-color:var(--accent);color:#fff}
 select{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
   padding:7px 12px;font-size:14px;font-family:inherit}
 .count{margin-left:auto;color:var(--muted);font-size:14px}
+/* Шторка фильтров. На широком экране все фильтры видны, поэтому кнопки нет;
+   на телефоне она прячет лишние строки и оставляет дни, счётчик и себя. */
+.filters-toggle{display:none;align-items:center;justify-content:center;border:1px solid var(--line);
+  background:transparent;color:var(--ink);border-radius:999px;padding:0;width:44px;height:44px;
+  font-family:inherit;cursor:pointer}
+.filters-toggle__icon--open{display:none}
+.filters-toggle[aria-expanded="true"]{border-color:var(--accent);color:var(--accent)}
+.filters-toggle[aria-expanded="true"] .filters-toggle__icon{display:none}
+.filters-toggle[aria-expanded="true"] .filters-toggle__icon--open{display:block}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:22px;margin-top:26px}
+@keyframes gridFlash{from{opacity:.3}to{opacity:1}}
+.grid--flash{animation:gridFlash .3s ease-out}
+@media (prefers-reduced-motion: reduce){.grid--flash{animation:none}}
 /* атрибут hidden должен побеждать display:flex у .card, иначе фильтры не скрывают карточки */
 [hidden]{display:none !important}
 .card{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg)}
-.card__media{display:block;background:var(--chip);height:200px}
-/* фиксированная высота 200px, афиша по центру без обрезки */
-.card__media img{display:block;width:100%;height:100%;object-fit:contain;object-position:center}
+/* Единый кадр 4:3: афиши приходят от организаторов разного размера, и без
+   общей рамки сетка выглядит рваной. Картинка не обрезается (contain):
+   на постерах бывает текст, который нельзя отрезать. */
+.card__media{position:relative;display:block;background:var(--media-bg);aspect-ratio:4/3}
+/* Картинка вынута из потока: иначе её собственная высота растягивала кадр
+   и соотношение 4:3 не соблюдалось. */
+.card__media img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center}
 .card__body{padding:14px 16px 18px;display:flex;flex-direction:column;gap:8px;flex:1}
 .card__meta{margin:0;font-size:13px;color:var(--accent);font-weight:600}
-.card__title{margin:0;font-size:18px;line-height:1.25}
+.card__title{margin:0;font-size:18px;line-height:1.28;letter-spacing:-.005em}
 .card__text{margin:0;font-size:15px;color:var(--muted);flex:1}
 .card__price{margin:0;font-size:14px;font-weight:600}
-.card__link{font-size:14px;color:var(--accent);text-decoration:none}
+/* Ссылка — цель для пальца: не меньше 44 px по высоте, иначе на телефоне
+   в неё сложно попасть. */
+.card__link{display:inline-flex;align-items:center;gap:6px;min-height:44px;
+  font-size:14px;color:var(--accent);text-decoration:none}
 .card__link:hover{text-decoration:underline}
 .card__report{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;margin-top:2px}
 .card__report:hover{text-decoration:underline}
@@ -46,7 +90,29 @@ select{border:1px solid var(--line);background:transparent;color:var(--ink);bord
 .past .chip{margin-left:8px;font-size:13px;padding:5px 12px}
 .empty{display:none;padding:40px 0;color:var(--muted)}
 footer{margin-top:32px;color:var(--muted);font-size:13px}
-@media (max-width:640px){.grid{grid-template-columns:1fr}h1{font-size:24px}}
+@media (max-width:640px){.grid{grid-template-columns:1fr}h1{font-size:24px}
+  /* На телефоне ссылка выглядит кнопкой во всю ширину: видно, что она
+     нажимается, и промахнуться сложнее. */
+  .card__link{justify-content:center;width:100%;min-height:48px;margin-top:2px;
+    border:1px solid var(--accent);border-radius:999px;font-size:15px;font-weight:600}
+  /* Два списка мест на телефоне делят одну строку: по отдельности они
+     растягивали фильтры на лишнюю сотню пикселей. */
+  .controls__row select{flex:1 1 auto;min-width:0;min-height:44px}
+  /* Шторка: в свёрнутом виде одна строка — дни, счётчик, кнопка. Если фильтры
+     включены, под ней остаются только они и «Сбросить», чтобы было видно,
+     почему выдача короткая. */
+  .filters-toggle{display:inline-flex}
+  .controls__row--top{gap:5px}
+  /* Цель для пальца не меньше 44 px — как у остальных чипов и кнопки шторки. */
+  .controls__row--top .chip{display:inline-flex;align-items:center;min-height:44px;
+    padding:0 13px;font-size:13px}
+  .count{font-size:13px}
+  .controls[data-open="false"] .controls__row--more{display:none}
+  .controls[data-open="false"][data-active="true"] .controls__row--more{display:flex}
+  .controls[data-open="false"] .controls__row--more > *{display:none}
+  .controls[data-open="false"] .controls__row--more > .chip[aria-current="page"],
+  .controls[data-open="false"] .controls__row--more > [data-reset]{display:inline-flex}
+  .controls[data-open="false"] .controls__row--more > select.is-set{display:inline-block}}
 /* Статьи: узкая колонка для чтения, живой блок событий и перелинковка */
 .crumbs{margin:18px 0 0;font-size:14px;color:var(--muted)}
 .crumbs a{color:var(--muted)}
