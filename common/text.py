@@ -185,6 +185,18 @@ _AREA_BY_CITY = {
 
 _RE_DISTRICT_IN_ADDRESS = re.compile(r"([А-ЯЁ][а-яё-]+)\s+район", re.IGNORECASE)
 
+# Посёлок области пишут как «Алексеевка (Новосибирский район)»: самого посёлка
+# нет в списке известных городов, но в скобках стоит район области, а не
+# городской. Такую запись считаем областью — иначе событие уезжает в каталог
+# Новосибирска и не попадает ни в «За городом», ни в список населённых пунктов.
+_RE_VILLAGE_IN_PARENS = re.compile(
+    r"(?:^|[,;.(]\s*)([А-ЯЁ][А-Яа-яё\-\s]{1,40}?)\s*\(([^)]*район[^)]*)\)"
+)
+_RE_SETTLEMENT_PREFIX = re.compile(
+    r"^(?:с|д|п|рп|р\.\s*п|пос|посёлок|поселок|село|деревня|станица|аул)\.?\s+",
+    re.IGNORECASE,
+)
+
 # Известные площадки: по адресу или упоминанию в тексте узнаём название,
 # адрес и район. Нужно в первую очередь агрегаторам (ТИЦ, НаДвиж), где
 # собственного адреса площадки в карточке нет.
@@ -823,6 +835,19 @@ def guess_area(*texts: str) -> str:
     for key, area in _AREA_BY_CITY.items():
         if key in blob:
             return area
+
+    for text in texts:
+        if not text:
+            continue
+        m = _RE_VILLAGE_IN_PARENS.search(text)
+        if not m:
+            continue
+        # «Новосибирск (Кировский район)» и подобное — это город, а не область.
+        if any(name.lower() in m.group(2).lower() for name in _DISTRICTS):
+            continue
+        place = _RE_SETTLEMENT_PREFIX.sub("", m.group(1).strip()).strip(" .")
+        if place and place.lower() not in _CITY_NAMES:
+            return place[:1].upper() + place[1:]
     return "Новосибирск"
 
 
