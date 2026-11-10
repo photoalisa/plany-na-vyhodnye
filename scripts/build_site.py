@@ -294,12 +294,28 @@ def date_label(ev: dict, weekend: bool = True) -> str:
     идёт: «7 ноября, сб», «8 ноября, вс» или «7–8 ноября». Период источника
     («1 ноя – 30 ноя») в подборке на выходные только сбивает с толку.
     """
+    time_part = f", {ev['time']}" if ev["time"] else ""
+    days = (ev.get("days") or []) if weekend else []
     if ev["kind"] == "permanent":
+        # «Постоянно» само по себе не говорит, попадёт ли человек на выставку
+        # в субботу: у музея может быть выходной. Пишем это прямо.
+        if days == ["sat"]:
+            return "постоянно, только в субботу"
+        if days == ["sun"]:
+            return "постоянно, только в воскресенье"
         return "постоянно"
     if not ev["start"]:
         return "дата уточняется"
     if ev["kind"] == "recurring":
-        return "каждую неделю" + (f", {ev['time']}" if ev["time"] else "")
+        # «Каждую неделю» не отвечает на вопрос «а в какой день?». Событие
+        # повторяется в конкретные дни, их и называем.
+        if days == ["sat"]:
+            return "каждую субботу" + time_part
+        if days == ["sun"]:
+            return "каждое воскресенье" + time_part
+        if days:
+            return "каждые выходные" + time_part
+        return "по выходным" + time_part
 
     days = (ev.get("days") or []) if weekend else []
     if days:
@@ -354,8 +370,14 @@ def card_html(ev: dict, weekend: bool = True) -> str:
             place = ""
     if place:
         meta.append(place)
-    if ev["venue"] and len(ev["venue"]) < 44:
-        meta.append(ev["venue"])
+    # Название площадки показываем целиком: обрезка по длине прятала
+    # «Искитимский городской историко-художественный музей» и читатель не
+    # понимал, куда ехать. Многоточие — только для совсем длинных названий.
+    venue = ev["venue"]
+    if len(venue) > 70:
+        venue = venue[:67].rstrip(" ,.-–—") + "…"
+    if venue:
+        meta.append(venue)
     attrs = " ".join(f'data-{k}="{str(v).lower()}"' for k, v in ev["flags"].items())
     day_attr = f' data-days="{" ".join(ev.get("days") or [])}"' if ev.get("days") else ""
     # data-end — конец события по часам посетителя: по нему браузер скрывает
@@ -373,7 +395,7 @@ def card_html(ev: dict, weekend: bool = True) -> str:
     # «страница источника», не обещая, кто именно её ведёт.
     link_label = ("Подробнее на странице источника "
                   "<span aria-hidden=\"true\">↗</span>" if ev["flags"]["free"]
-                  else "Билеты на странице источника <span aria-hidden=\"true\">↗</span>")
+                  else "Вся информация на странице источника <span aria-hidden=\"true\">↗</span>")
     open_hint = f"Открыть страницу источника: {ev['title']}"
     return f"""
 <article class="card" {attrs}{day_attr}{end_attr}{start_attr} data-district="{esc(ev['district'])}" data-geo="{esc(ev['area'])}">
@@ -406,10 +428,9 @@ def chips_html(active: str = "", events: list[dict] | None = None) -> str:
         if events is not None and key != active:
             if not any(ev["flags"].get(key) for ev in events):
                 continue
-        extra = " chip--free" if key == "free" else ""
         current = ' aria-current="page"' if key == active else ""
         buttons.append(
-            f'<a class="chip{extra}" href="/{slug}/" data-filter="{key}"{current}>{label}</a>'
+            f'<a class="chip" href="/{slug}/" data-filter="{key}"{current}>{label}</a>'
         )
     return "".join(buttons)
 
@@ -664,16 +685,21 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
 
     controls = ""
     if show_filters:
+        # Дни и счётчик — первая строка, остальные фильтры — вторая: так на
+        # телефоне сразу видно, что показано, и не приходится листать чипы.
         controls = (
             '<div class="controls">'
+            '<div class="controls__row">'
             + day_chips_html()
-            + '<span class="controls__divider" aria-hidden="true"></span>'
-            + chips_html(active_filter, all_events)
-            + zone_select_html(all_events, geo_select)
-            + '<button class="chip" data-reset>Сбросить</button>'
             + f'<span class="count" role="status" aria-live="polite" aria-atomic="true">'
               f'<span data-count>{len(events)}</span></span>'
             + "</div>"
+            '<div class="controls__row">'
+            + chips_html(active_filter, all_events)
+            + zone_select_html(all_events, geo_select)
+            + '<button class="chip" data-reset>Сбросить</button>'
+            + "</div>"
+            "</div>"
         )
 
     return f"""<!doctype html>
@@ -1132,14 +1158,12 @@ h2{font-size:20px;margin:32px 0 12px}
 .release{color:var(--muted);font-size:13px;margin:-14px 0 18px}
 .release time{font-variant-numeric:tabular-nums}
 .controls{position:sticky;top:0;background:var(--bg);padding:12px 0;z-index:5;
-  display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--line)}
+  display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)}
+.controls__row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .chip{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
   padding:7px 14px;font-size:14px;cursor:pointer;font-family:inherit}
 a.chip{display:inline-flex;align-items:center;text-decoration:none}
 .chip[aria-pressed="true"],.chip[aria-current="page"]{background:var(--accent);border-color:var(--accent);color:#fff}
-.chip--free{font-weight:600}
-.chip--free[aria-pressed="true"],.chip--free[aria-current="page"]{background:var(--accent);border-color:var(--accent);color:#fff}
-.controls__divider{width:1px;height:22px;background:var(--line);margin:0 4px}
 select{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
   padding:7px 12px;font-size:14px;font-family:inherit}
 .count{margin-left:auto;color:var(--muted);font-size:14px}
