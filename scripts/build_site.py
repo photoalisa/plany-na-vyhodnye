@@ -688,13 +688,22 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
         else:
             places = district_select_html(all_events) + area_select_html(all_events)
         controls = (
-            '<div class="controls">'
-            '<div class="controls__row">'
+            '<div class="controls" data-open="false" data-active="false">'
+            '<div class="controls__row controls__row--top">'
             + day_chips_html()
             + f'<span class="count" role="status" aria-live="polite" aria-atomic="true">'
               f'<span data-count>{len(events)}</span></span>'
+            + '<button class="filters-toggle" type="button" aria-expanded="false" '
+              'aria-controls="filters-more" aria-label="Показать фильтры">'
+              '<svg class="filters-toggle__icon" viewBox="0 0 24 24" width="20" height="20" fill="none" '
+              'stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">'
+              '<path d="M4 7h16M7 12h10M10 17h4"/></svg>'
+              '<svg class="filters-toggle__icon filters-toggle__icon--open" viewBox="0 0 24 24" width="20" '
+              'height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+              'stroke-linejoin="round" aria-hidden="true"><path d="M6 14l6-6 6 6"/></svg>'
+              "</button>"
             + "</div>"
-            '<div class="controls__row">'
+            '<div class="controls__row controls__row--more" id="filters-more">'
             + chips_html(active_filter, all_events, skip=skip)
             + places
             + '<button class="chip" data-reset>Сбросить</button>'
@@ -1167,6 +1176,15 @@ a.chip{display:inline-flex;align-items:center;text-decoration:none}
 select{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
   padding:7px 12px;font-size:14px;font-family:inherit}
 .count{margin-left:auto;color:var(--muted);font-size:14px}
+/* Шторка фильтров. На широком экране все фильтры видны, поэтому кнопки нет;
+   на телефоне она прячет лишние строки и оставляет дни, счётчик и себя. */
+.filters-toggle{display:none;align-items:center;justify-content:center;border:1px solid var(--line);
+  background:transparent;color:var(--ink);border-radius:999px;padding:0;width:44px;height:44px;
+  font-family:inherit;cursor:pointer}
+.filters-toggle__icon--open{display:none}
+.filters-toggle[aria-expanded="true"]{border-color:var(--accent);color:var(--accent)}
+.filters-toggle[aria-expanded="true"] .filters-toggle__icon{display:none}
+.filters-toggle[aria-expanded="true"] .filters-toggle__icon--open{display:block}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:22px;margin-top:26px}
 @keyframes gridFlash{from{opacity:.3}to{opacity:1}}
 .grid--flash{animation:gridFlash .3s ease-out}
@@ -1203,7 +1221,20 @@ footer{margin-top:32px;color:var(--muted);font-size:13px}
     border:1px solid var(--accent);border-radius:999px;font-size:15px;font-weight:600}
   /* Два списка мест на телефоне делят одну строку: по отдельности они
      растягивали фильтры на лишнюю сотню пикселей. */
-  .controls__row select{flex:1 1 auto;min-width:0;min-height:44px}}
+  .controls__row select{flex:1 1 auto;min-width:0;min-height:44px}
+  /* Шторка: в свёрнутом виде одна строка — дни, счётчик, кнопка. Если фильтры
+     включены, под ней остаются только они и «Сбросить», чтобы было видно,
+     почему выдача короткая. */
+  .filters-toggle{display:inline-flex}
+  .controls__row--top{gap:5px}
+  .controls__row--top .chip{padding:7px 10px;font-size:13px}
+  .count{font-size:13px}
+  .controls[data-open="false"] .controls__row--more{display:none}
+  .controls[data-open="false"][data-active="true"] .controls__row--more{display:flex}
+  .controls[data-open="false"] .controls__row--more > *{display:none}
+  .controls[data-open="false"] .controls__row--more > .chip[aria-current="page"],
+  .controls[data-open="false"] .controls__row--more > [data-reset]{display:inline-flex}
+  .controls[data-open="false"] .controls__row--more > select.is-set{display:inline-block}}
 /* Статьи: узкая колонка для чтения, живой блок событий и перелинковка */
 .crumbs{margin:18px 0 0;font-size:14px;color:var(--muted)}
 .crumbs a{color:var(--muted)}
@@ -1250,6 +1281,8 @@ const pastNote = document.querySelector('[data-past]');
 const pastToggle = document.querySelector('[data-past-toggle]');
 const counter = document.querySelector('[data-count]');
 const empty = document.querySelector('.empty');
+const controlsEl = document.querySelector('.controls');
+const toggleBtn = document.querySelector('.filters-toggle');
 let showPast = false;
 
 // Действия для счётчика: GoatCounter не ставит cookie и не хранит персональные
@@ -1316,6 +1349,21 @@ function syncUrl(){
   if (next !== location.pathname + location.search) history.replaceState(null, '', next);
 }
 
+// Состояние шторки: если ни один фильтр не включён, второй строки нет вовсе —
+// на телефоне остаются только дни, счётчик и кнопка. Если включён, под ней
+// видны только включённые фильтры и «Сбросить», иначе непонятно, почему
+// выдача короче полной.
+function syncFilters(){
+  if (!controlsEl) return;
+  const place = Boolean(
+    (districtSel && plain(districtSel.value)) || (areaSel && plain(areaSel.value))
+  );
+  controlsEl.dataset.active = String(active.size > 0 || place);
+  [districtSel, areaSel].forEach(sel => {
+    if (sel) sel.classList.toggle('is-set', Boolean(plain(sel.value)));
+  });
+}
+
 // Прошедшее событие определяем по часам посетителя: сервер собрал страницу
 // утром, а смотрят её вечером, и субботний концерт в воскресенье уже неактуален.
 function isPast(card){
@@ -1375,6 +1423,7 @@ function apply(animate){
   }
   if (empty) empty.style.display = shown || past ? 'none' : 'block';
   updatePast(past);
+  syncFilters();
   syncUrl();
 }
 
@@ -1408,6 +1457,16 @@ dayChips.forEach(chip => chip.addEventListener('click', () => {
     track(key, plain(sel.value) || 'all');
   });
 });
+
+if (controlsEl && toggleBtn){
+  toggleBtn.addEventListener('click', () => {
+    const open = controlsEl.dataset.open === 'true';
+    controlsEl.dataset.open = String(!open);
+    toggleBtn.setAttribute('aria-expanded', String(!open));
+    toggleBtn.setAttribute('aria-label', !open ? 'Свернуть фильтры' : 'Показать фильтры');
+    track('filters', !open ? 'open' : 'close');
+  });
+}
 
 if (pastToggle) {
   pastToggle.addEventListener('click', () => {
