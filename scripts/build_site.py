@@ -414,7 +414,8 @@ def card_html(ev: dict, weekend: bool = True) -> str:
 </article>"""
 
 
-def chips_html(active: str = "", events: list[dict] | None = None) -> str:
+def chips_html(active: str = "", events: list[dict] | None = None,
+               skip: frozenset = frozenset()) -> str:
     """Фильтры — настоящие ссылки: по ним ходят поисковики, а JS гасит переход.
 
     Кнопкой их делать нельзя: страницы подборок (/besplatno/ и остальные)
@@ -426,6 +427,8 @@ def chips_html(active: str = "", events: list[dict] | None = None) -> str:
     """
     buttons = []
     for key, label, slug, *_ in FILTERS:
+        if key in skip:
+            continue
         if events is not None and key != active:
             if not any(ev["flags"].get(key) for ev in events):
                 continue
@@ -449,36 +452,24 @@ def area_names(events: list[dict]) -> list[str]:
                    if e["area"] and e["area"] != "Новосибирск"})
 
 
-def zone_select_html(events: list[dict], geo: bool = False) -> str:
-    """Один список мест: районы города и населённые пункты области.
-
-    На каталоге нужны районы, но человек, который выбрал «За городом», ищет
-    Сузун и Искитим — поэтому в списке две группы, а значение опции помечено
-    префиксом: «d:Центральный» — район, «g:Искитим» — город области.
-    На странице «За городом» остаются только пункты области.
-    """
+def district_select_html(events: list[dict]) -> str:
+    """Районы города — отдельный список: в общем они путались с областью."""
     districts = sorted({e["district"] for e in events if e["district"]})
-    areas = area_names(events)
-
-    if geo:
-        if len(areas) < 2:
-            return ""
-        options = "".join(f'<option value="g:{esc(n)}">{esc(n)}</option>' for n in areas)
-        return ('<select id="district" data-zone="place" aria-label="Населённый пункт">'
-                '<option value="">Вся область</option>' + options + "</select>")
-
-    groups = []
-    if districts:
-        options = "".join(f'<option value="d:{esc(d)}">{esc(d)}</option>' for d in districts)
-        groups.append(f'<optgroup label="Районы города">{options}</optgroup>')
-    if areas:
-        options = "".join(f'<option value="g:{esc(n)}">{esc(n)}</option>' for n in areas)
-        groups.append(f'<optgroup label="Область">{options}</optgroup>')
-    if not groups:
+    if not districts:
         return ""
-    return ('<select id="district" data-zone="place" '
-            'aria-label="Район города или населённый пункт области">'
-            '<option value="">Все места</option>' + "".join(groups) + "</select>")
+    options = "".join(f'<option value="{esc(d)}">{esc(d)}</option>' for d in districts)
+    return ('<select id="district" aria-label="Районы Новосибирска">'
+            '<option value="">Районы Новосибирска</option>' + options + "</select>")
+
+
+def area_select_html(events: list[dict], default_label: str = "За городом") -> str:
+    """Населённые пункты области — то, что человек ищет в фильтре «За городом»."""
+    areas = area_names(events)
+    if len(areas) < 2:
+        return ""
+    options = "".join(f'<option value="{esc(n)}">{esc(n)}</option>' for n in areas)
+    return ('<select id="geo" aria-label="За городом: населённый пункт области">'
+            f'<option value="">{esc(default_label)}</option>' + options + "</select>")
 
 
 def json_ld(events: list[dict], page_name: str) -> str:
@@ -688,6 +679,14 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
     if show_filters:
         # Дни и счётчик — первая строка, остальные фильтры — вторая: так на
         # телефоне сразу видно, что показано, и не приходится листать чипы.
+        # «За городом» здесь не чип, а список населённых пунктов области —
+        # так же, как районы города в соседнем списке. На остальных подборках
+        # чип остаётся: по нему иначе не дойти до страницы /za-gorodom/.
+        skip = frozenset({"outside"}) if active_filter in ("", "outside") else frozenset()
+        if geo_select:
+            places = area_select_html(all_events, default_label="Вся область")
+        else:
+            places = district_select_html(all_events) + area_select_html(all_events)
         controls = (
             '<div class="controls">'
             '<div class="controls__row">'
@@ -696,8 +695,8 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
               f'<span data-count>{len(events)}</span></span>'
             + "</div>"
             '<div class="controls__row">'
-            + chips_html(active_filter, all_events)
-            + zone_select_html(all_events, geo_select)
+            + chips_html(active_filter, all_events, skip=skip)
+            + places
             + '<button class="chip" data-reset>Сбросить</button>'
             + "</div>"
             "</div>"
@@ -1053,7 +1052,7 @@ def build(rows: list[dict], out: Path, today: date, base: str = "",
         title=f"Куда пойти на выходных в Новосибирске — {weekend_label()}",
         description="Афиша Новосибирска на субботу и воскресенье: выставки, лекции, концерты "
                     "и прогулки. Адреса, ссылки на организаторов, есть бесплатные и для детей.",
-        lead="Анонсы выставок, лекций, концертов и прогулок. Откройте событие — там программа, фото и цены.",
+        lead="Анонсы выставок, лекций, концертов и прогулок. Каждое событие ведёт на источник — там актуальная информация о мероприятии.",
         events=events, all_events=events, path="",
         h1="Куда пойти на выходных",
         release=release,
@@ -1201,7 +1200,10 @@ footer{margin-top:32px;color:var(--muted);font-size:13px}
   /* На телефоне ссылка выглядит кнопкой во всю ширину: видно, что она
      нажимается, и промахнуться сложнее. */
   .card__link{justify-content:center;width:100%;min-height:48px;margin-top:2px;
-    border:1px solid var(--accent);border-radius:999px;font-size:15px;font-weight:600}}
+    border:1px solid var(--accent);border-radius:999px;font-size:15px;font-weight:600}
+  /* Два списка мест на телефоне делят одну строку: по отдельности они
+     растягивали фильтры на лишнюю сотню пикселей. */
+  .controls__row select{flex:1 1 auto;min-width:0;min-height:44px}}
 /* Статьи: узкая колонка для чтения, живой блок событий и перелинковка */
 .crumbs{margin:18px 0 0;font-size:14px;color:var(--muted)}
 .crumbs a{color:var(--muted)}
@@ -1234,21 +1236,15 @@ const cards = [...document.querySelectorAll('.card')];
 const gridEl = document.querySelector('.grid');
 const chips = [...document.querySelectorAll('.chip[data-filter]')];
 const dayChips = [...document.querySelectorAll('.chip[data-day]')];
-// Список площадок: на каталоге это районы города, на «За городом» —
-// населённые пункты области. Скрипт один, поэтому ключ берём из data-zone.
-const zone = document.querySelector('#district, #geo');
-// Значение опции: «d:Центральный» — район города, «g:Искитим» — город
-// области. Старые ссылки без префикса считаем районом.
-function zoneOf(value){
+// Два списка мест: районы города (#district) и населённые пункты области
+// (#geo, он же фильтр «За городом»). Значения опций — просто названия;
+// префиксы «d:» и «g:» остались в старых ссылках, их снимаем.
+const districtSel = document.querySelector('#district');
+const areaSel = document.querySelector('#geo');
+function plain(value){
   const raw = value || '';
   const cut = raw.indexOf(':');
-  if (cut > 0){
-    const prefix = raw.slice(0, cut);
-    if (prefix === 'd' || prefix === 'g'){
-      return {field: prefix === 'g' ? 'geo' : 'district', name: raw.slice(cut + 1)};
-    }
-  }
-  return {field: 'district', name: raw};
+  return cut > 0 ? raw.slice(cut + 1) : raw;
 }
 const pastNote = document.querySelector('[data-past]');
 const pastToggle = document.querySelector('[data-past-toggle]');
@@ -1285,14 +1281,16 @@ function syncDayChips(){
 }
 syncDayChips();
 
-if (zone){
-  const wanted = params.get('district') || params.get('geo') || '';
-  if (wanted){
-    const values = [...zone.options].map(o => o.value);
-    const match = [wanted, 'd:' + wanted, 'g:' + wanted].find(v => values.includes(v));
-    if (match) zone.value = match;
-  }
+function restorePlace(sel, param, prefix){
+  if (!sel) return;
+  const wanted = plain(params.get(param) || '');
+  if (!wanted) return;
+  const values = [...sel.options].map(o => o.value);
+  const match = [wanted, prefix + ':' + wanted].find(v => values.includes(v));
+  if (match) sel.value = match;
 }
+restorePlace(districtSel, 'district', 'd');
+restorePlace(areaSel, 'geo', 'g');
 
 function plural(n){
   const m = n % 100, d = n % 10;
@@ -1307,8 +1305,10 @@ function syncUrl(){
     if (active.has(k)) params.set(k, '1'); else params.delete(k);
   });
   if (day) params.set('day', day); else params.delete('day');
-  const z = zone ? zone.value : '';
-  if (z) params.set('district', z); else params.delete('district');
+  const district = districtSel ? plain(districtSel.value) : '';
+  if (district) params.set('district', district); else params.delete('district');
+  const area = areaSel ? plain(areaSel.value) : '';
+  if (area) params.set('geo', area); else params.delete('geo');
   const q = params.toString();
   const next = q ? '?' + q : location.pathname;
   // apply() вызывается ещё и по таймеру: без сравнения адрес переписывался бы
@@ -1333,13 +1333,14 @@ function updatePast(past){
 }
 
 function apply(animate){
-  const z = zone ? zone.value : '';
-  const zoneSel = zoneOf(z);
+  const district = districtSel ? plain(districtSel.value) : '';
+  const area = areaSel ? plain(areaSel.value) : '';
   let shown = 0, past = 0;
   const visibleCards = [];
   for (const card of cards){
     const okFlags = [...active].every(k => card.dataset[k] === 'true');
-    const okZone = !z || (card.dataset[zoneSel.field] || '') === zoneSel.name;
+    const okZone = (!district || (card.dataset.district || '') === district)
+                && (!area || (card.dataset.geo || '') === area);
     const okDay = !day || (card.dataset.days || '').split(' ').includes(day);
     const matches = okFlags && okZone && okDay;
     const gone = matches && isPast(card);
@@ -1400,12 +1401,13 @@ dayChips.forEach(chip => chip.addEventListener('click', () => {
   track('day', day || 'both');
 }));
 
-if (zone) {
-  zone.addEventListener('change', () => {
+[[districtSel, 'district'], [areaSel, 'place']].forEach(([sel, key]) => {
+  if (!sel) return;
+  sel.addEventListener('change', () => {
     apply(true);
-    track(zoneKey, zone.value || 'all');
+    track(key, plain(sel.value) || 'all');
   });
-}
+});
 
 if (pastToggle) {
   pastToggle.addEventListener('click', () => {
@@ -1446,7 +1448,7 @@ document.querySelectorAll('[data-reset]').forEach(btn => btn.addEventListener('c
   showPast = false;
   chips.forEach(chip => chip.removeAttribute('aria-current'));
   syncDayChips();
-  if (zone) zone.value = '';
+  [districtSel, areaSel].forEach(sel => { if (sel) sel.value = ''; });
   apply(true);
 }));
 
