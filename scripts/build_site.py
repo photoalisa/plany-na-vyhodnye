@@ -408,7 +408,6 @@ def card_html(ev: dict, weekend: bool = True) -> str:
     <h3 class="card__title">{esc(ev['title'])}</h3>
     <p class="card__text">{esc(cut_text(ev['text']))}</p>
     <p class="card__price">{esc(price)}</p>
-    <p class="card__hint">Откройте событие — там программа, фото и цены.</p>
     <a class="card__link" href="{esc(ev['url'])}" target="_blank" rel="noopener nofollow">{link_label}</a>
     {report_link()}
   </div>
@@ -1054,7 +1053,7 @@ def build(rows: list[dict], out: Path, today: date, base: str = "",
         title=f"Куда пойти на выходных в Новосибирске — {weekend_label()}",
         description="Афиша Новосибирска на субботу и воскресенье: выставки, лекции, концерты "
                     "и прогулки. Адреса, ссылки на организаторов, есть бесплатные и для детей.",
-        lead="Анонсы выставок, лекций, концертов и прогулок.",
+        lead="Анонсы выставок, лекций, концертов и прогулок. Откройте событие — там программа, фото и цены.",
         events=events, all_events=events, path="",
         h1="Куда пойти на выходных",
         release=release,
@@ -1184,7 +1183,6 @@ select{border:1px solid var(--line);background:transparent;color:var(--ink);bord
 .card__title{margin:0;font-size:18px;line-height:1.25}
 .card__text{margin:0;font-size:15px;color:var(--muted);flex:1}
 .card__price{margin:0;font-size:14px;font-weight:600}
-.card__hint{margin:0;font-size:13px;color:var(--muted)}
 /* Ссылка — цель для пальца: не меньше 44 px по высоте, иначе на телефоне
    в неё сложно попасть. */
 .card__link{display:inline-flex;align-items:center;gap:6px;min-height:44px;
