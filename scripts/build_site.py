@@ -297,13 +297,15 @@ def date_label(ev: dict, weekend: bool = True) -> str:
     time_part = f", {ev['time']}" if ev["time"] else ""
     days = (ev.get("days") or []) if weekend else []
     if ev["kind"] == "permanent":
-        # «Постоянно» само по себе не говорит, попадёт ли человек на выставку
-        # в субботу: у музея может быть выходной. Пишем это прямо.
+        # Постоянная экспозиция идёт не только по выходным — в будни она тоже
+        # открыта. Поэтому пишем про два конкретных дня этих выходных, а не
+        # «по субботам и воскресеньям»: множественное число читается как
+        # «работает только по выходным».
         if days == ["sat"]:
-            return "постоянно, только в субботу"
+            return "в субботу"
         if days == ["sun"]:
-            return "постоянно, только в воскресенье"
-        return "постоянно"
+            return "в воскресенье"
+        return "в субботу и воскресенье"
     if not ev["start"]:
         return "дата уточняется"
     if ev["kind"] == "recurring":
@@ -394,8 +396,7 @@ def card_html(ev: dict, weekend: bool = True) -> str:
     # «ВКонтакте», билетный сервис или другой агрегатор. Поэтому говорим
     # «страница источника», не обещая, кто именно её ведёт.
     link_label = ("Подробнее на странице источника "
-                  "<span aria-hidden=\"true\">↗</span>" if ev["flags"]["free"]
-                  else "Вся информация на странице источника <span aria-hidden=\"true\">↗</span>")
+                  "<span aria-hidden=\"true\">↗</span>")
     open_hint = f"Открыть страницу источника: {ev['title']}"
     return f"""
 <article class="card" {attrs}{day_attr}{end_attr}{start_attr} data-district="{esc(ev['district'])}" data-geo="{esc(ev['area'])}">
@@ -407,6 +408,7 @@ def card_html(ev: dict, weekend: bool = True) -> str:
     <h3 class="card__title">{esc(ev['title'])}</h3>
     <p class="card__text">{esc(cut_text(ev['text']))}</p>
     <p class="card__price">{esc(price)}</p>
+    <p class="card__hint">Откройте событие — там программа, фото и цены.</p>
     <a class="card__link" href="{esc(ev['url'])}" target="_blank" rel="noopener nofollow">{link_label}</a>
     {report_link()}
   </div>
@@ -1052,7 +1054,7 @@ def build(rows: list[dict], out: Path, today: date, base: str = "",
         title=f"Куда пойти на выходных в Новосибирске — {weekend_label()}",
         description="Афиша Новосибирска на субботу и воскресенье: выставки, лекции, концерты "
                     "и прогулки. Адреса, ссылки на организаторов, есть бесплатные и для детей.",
-        lead="Выставки, лекции, концерты и прогулки.",
+        lead="Анонсы выставок, лекций, концертов и прогулок.",
         events=events, all_events=events, path="",
         h1="Куда пойти на выходных",
         release=release,
@@ -1182,7 +1184,11 @@ select{border:1px solid var(--line);background:transparent;color:var(--ink);bord
 .card__title{margin:0;font-size:18px;line-height:1.25}
 .card__text{margin:0;font-size:15px;color:var(--muted);flex:1}
 .card__price{margin:0;font-size:14px;font-weight:600}
-.card__link{font-size:14px;color:var(--accent);text-decoration:none}
+.card__hint{margin:0;font-size:13px;color:var(--muted)}
+/* Ссылка — цель для пальца: не меньше 44 px по высоте, иначе на телефоне
+   в неё сложно попасть. */
+.card__link{display:inline-flex;align-items:center;gap:6px;min-height:44px;
+  font-size:14px;color:var(--accent);text-decoration:none}
 .card__link:hover{text-decoration:underline}
 .card__report{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;margin-top:2px}
 .card__report:hover{text-decoration:underline}
@@ -1193,7 +1199,11 @@ select{border:1px solid var(--line);background:transparent;color:var(--ink);bord
 .past .chip{margin-left:8px;font-size:13px;padding:5px 12px}
 .empty{display:none;padding:40px 0;color:var(--muted)}
 footer{margin-top:32px;color:var(--muted);font-size:13px}
-@media (max-width:640px){.grid{grid-template-columns:1fr}h1{font-size:24px}}
+@media (max-width:640px){.grid{grid-template-columns:1fr}h1{font-size:24px}
+  /* На телефоне ссылка выглядит кнопкой во всю ширину: видно, что она
+     нажимается, и промахнуться сложнее. */
+  .card__link{justify-content:center;width:100%;min-height:48px;margin-top:2px;
+    border:1px solid var(--accent);border-radius:999px;font-size:15px;font-weight:600}}
 /* Статьи: узкая колонка для чтения, живой блок событий и перелинковка */
 .crumbs{margin:18px 0 0;font-size:14px;color:var(--muted)}
 .crumbs a{color:var(--muted)}
