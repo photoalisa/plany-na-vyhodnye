@@ -38,6 +38,8 @@ SOURCES: list[Source] = [
     Source("Парки", "parsers.parkigoroda", "parkigoroda-nsk.ru", "событие", "", "", 45),
     Source("Искитимский музей", "parsers.iskmuseum", "iskmuseum.ru", "выставка",
            "Искитимский городской историко-художественный музей", "", 42),
+    Source("Гастрокорт", "parsers.gastronom", "gastro-nsk.ru", "событие",
+           "Гастрокорт", "Центральный", 60),
     # Агрегаторы: только то, чего нет у первоисточников.
     Source("ТИЦ", "parsers.welcome_tic", "welcome-novosibirsk.ru", "событие", "Туристско-информационный центр", "Центральный", 80),
     Source("НаДвиж", "parsers.nadvizh", "nadvizh.ru", "событие", "", "", 90),
