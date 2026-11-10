@@ -732,15 +732,16 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#FBFAF7">
 <link rel="stylesheet" href="/assets/style.css?v={BUILD_VERSION}">
-<link rel="icon" href="/placeholder.svg" type="image/svg+xml">
+<link rel="icon" href="/mark.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <script type="application/ld+json">{json_ld(events, title)}</script>
 </head>
 <body>
 <a class="skip-link" href="#events">Перейти к содержимому</a>
 <div class="wrap">
   <header class="top">
-    <a class="brand" href="/">{esc(SITE_NAME)}</a>
-    <span class="weekend">{esc(weekend_label())}</span>
+    {header_html()}
   </header>
 
   <main id="events">
@@ -767,6 +768,23 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
 {counter_html()}
 </body>
 </html>"""
+
+
+def header_html() -> str:
+    """Шапка: знак, название, город и дата выходных.
+
+    Знак — пилон четвёртого моста, он же буква «Н»: узнаётся в 16 px и
+    повторяется в иконке сайта, превью ссылок и карточках на главной.
+    """
+    return (
+        '<a class="brand" href="/">'
+        '<img class="brand__mark" src="/mark.svg" alt="" width="30" height="30">'
+        '<span class="brand__text">'
+        '<span class="brand__name">Планы на выходные</span>'
+        '<span class="brand__city">Новосибирск</span>'
+        "</span></a>"
+        f'<span class="weekend">{esc(weekend_label())}</span>'
+    )
 
 
 def weekend_label() -> str:
@@ -903,15 +921,16 @@ def article_page_html(article, events: list[dict], others: list) -> str:
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#FBFAF7">
 <link rel="stylesheet" href="/assets/style.css?v={BUILD_VERSION}">
-<link rel="icon" href="/placeholder.svg" type="image/svg+xml">
+<link rel="icon" href="/mark.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <script type="application/ld+json">{article_json_ld(article)}</script>
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к тексту</a>
 <div class="wrap">
   <header class="top">
-    <a class="brand" href="/">{esc(SITE_NAME)}</a>
-    <span class="weekend">{esc(weekend_label())}</span>
+    {header_html()}
   </header>
 
   <nav class="crumbs"><a href="/">Главная</a> · <a href="/statyi/">Статьи</a></nav>
@@ -956,14 +975,15 @@ def statyi_index_html(articles: list) -> str:
 <meta property="og:image" content="{SITE_URL}/og.png">
 <meta name="theme-color" content="#FBFAF7">
 <link rel="stylesheet" href="/assets/style.css?v={BUILD_VERSION}">
-<link rel="icon" href="/placeholder.svg" type="image/svg+xml">
+<link rel="icon" href="/mark.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к статьям</a>
 <div class="wrap">
   <header class="top">
-    <a class="brand" href="/">{esc(SITE_NAME)}</a>
-    <span class="weekend">{esc(weekend_label())}</span>
+    {header_html()}
   </header>
 
   <nav class="crumbs"><a href="/">Главная</a> · Статьи</nav>
@@ -1048,9 +1068,13 @@ def build(rows: list[dict], out: Path, today: date, base: str = "",
     (out / "placeholder.svg").write_text(PLACEHOLDER_SVG, encoding="utf-8")
 
     if STATIC_DIR.exists():
-        for extra in sorted(STATIC_DIR.iterdir()):
+        # Обходим вложенные папки: так в сборку попадают шрифты
+        # (static/assets/fonts/…) и иконки, а не только файлы из корня.
+        for extra in sorted(STATIC_DIR.rglob("*")):
             if extra.is_file():
-                (out / extra.name).write_bytes(extra.read_bytes())
+                target = out / extra.relative_to(STATIC_DIR)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(extra.read_bytes())
 
     def write(rel: str, content: str) -> None:
         path = out / rel
@@ -1145,10 +1169,23 @@ def build(rows: list[dict], out: Path, today: date, base: str = "",
 
 
 CSS = """
-:root{--bg:#FBFAF7;--ink:#14110F;--muted:#6B625A;--accent:#1F5E4B;--chip:#E8E2D6;--line:#E3DDD1}
-@media (prefers-color-scheme:dark){:root{--bg:#14110F;--ink:#F3EFE7;--muted:#A79E93;--accent:#7FC7A8;--chip:#242019;--line:#2E2822}}
+/* Шрифт лежит рядом с сайтом: без внешних запросов страница одинаково
+   выглядит и открывается быстрее — важно для мобильных на слабом сигнале. */
+@font-face{font-family:"Golos Text";font-style:normal;font-weight:400 900;font-display:swap;
+  src:url("fonts/golos-text-cyrillic.woff2") format("woff2");
+  unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+@font-face{font-family:"Golos Text";font-style:normal;font-weight:400 900;font-display:swap;
+  src:url("fonts/golos-text-latin.woff2") format("woff2");
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,
+  U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+:root{--bg:#FBFAF7;--ink:#14110F;--muted:#6B625A;--accent:#1F5E4B;--chip:#E8E2D6;--line:#E3DDD1;
+  --media-bg:#F1EEE7;
+  --font-display:"Golos Text",-apple-system,"Segoe UI",Roboto,sans-serif}
+@media (prefers-color-scheme:dark){:root{--bg:#14110F;--ink:#F3EFE7;--muted:#A79E93;--accent:#7FC7A8;
+  --chip:#242019;--line:#2E2822;--media-bg:#1F1B15}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,"Segoe UI",Roboto,sans-serif}
+h1,h2,h3,.brand__name,.card__title{font-family:var(--font-display)}
 .skip-link{position:absolute;left:-9999px;top:0;z-index:100;background:var(--accent);color:#fff;
   padding:10px 18px;border-radius:0 0 10px 0;font-size:14px;font-weight:600;text-decoration:none}
 .skip-link:focus{left:0}
@@ -1157,10 +1194,15 @@ body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .chip:focus-visible,a.chip:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .wrap{max-width:1120px;margin:0 auto;padding:24px 20px 64px}
-header.top{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;
+header.top{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
   border-bottom:1px solid var(--line);padding-bottom:16px}
-.brand{font-weight:700;letter-spacing:.04em;text-transform:uppercase;font-size:14px;color:var(--ink);text-decoration:none}
-.weekend{color:var(--muted);font-size:14px}
+.brand{display:inline-flex;align-items:center;gap:11px;text-decoration:none;color:var(--ink)}
+.brand__mark{display:block;width:30px;height:30px;border-radius:7px}
+.brand__text{display:flex;flex-direction:column;gap:3px}
+.brand__name{font-size:16px;font-weight:600;letter-spacing:-.005em;line-height:1}
+.brand__city{font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--muted);line-height:1}
+.weekend{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
 h1{font-size:28px;line-height:1.2;margin:28px 0 6px}
 h2{font-size:20px;margin:32px 0 12px}
 .lead{color:var(--muted);margin:0 0 22px;max-width:62ch}
@@ -1192,12 +1234,16 @@ select{border:1px solid var(--line);background:transparent;color:var(--ink);bord
 /* атрибут hidden должен побеждать display:flex у .card, иначе фильтры не скрывают карточки */
 [hidden]{display:none !important}
 .card{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg)}
-.card__media{display:block;background:var(--chip);height:200px}
-/* фиксированная высота 200px, афиша по центру без обрезки */
-.card__media img{display:block;width:100%;height:100%;object-fit:contain;object-position:center}
+/* Единый кадр 4:3: афиши приходят от организаторов разного размера, и без
+   общей рамки сетка выглядит рваной. Картинка не обрезается (contain):
+   на постерах бывает текст, который нельзя отрезать. */
+.card__media{position:relative;display:block;background:var(--media-bg);aspect-ratio:4/3}
+/* Картинка вынута из потока: иначе её собственная высота растягивала кадр
+   и соотношение 4:3 не соблюдалось. */
+.card__media img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center}
 .card__body{padding:14px 16px 18px;display:flex;flex-direction:column;gap:8px;flex:1}
 .card__meta{margin:0;font-size:13px;color:var(--accent);font-weight:600}
-.card__title{margin:0;font-size:18px;line-height:1.25}
+.card__title{margin:0;font-size:18px;line-height:1.28;letter-spacing:-.005em}
 .card__text{margin:0;font-size:15px;color:var(--muted);flex:1}
 .card__price{margin:0;font-size:14px;font-weight:600}
 /* Ссылка — цель для пальца: не меньше 44 px по высоте, иначе на телефоне
@@ -1227,7 +1273,9 @@ footer{margin-top:32px;color:var(--muted);font-size:13px}
      почему выдача короткая. */
   .filters-toggle{display:inline-flex}
   .controls__row--top{gap:5px}
-  .controls__row--top .chip{padding:7px 10px;font-size:13px}
+  /* Цель для пальца не меньше 44 px — как у остальных чипов и кнопки шторки. */
+  .controls__row--top .chip{display:inline-flex;align-items:center;min-height:44px;
+    padding:0 13px;font-size:13px}
   .count{font-size:13px}
   .controls[data-open="false"] .controls__row--more{display:none}
   .controls[data-open="false"][data-active="true"] .controls__row--more{display:flex}
