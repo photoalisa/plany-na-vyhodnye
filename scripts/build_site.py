@@ -361,15 +361,23 @@ def card_html(ev: dict, weekend: bool = True) -> str:
     # data-end — конец события по часам посетителя: по нему браузер скрывает
     # прошедшее, чтобы в воскресенье вечером не висели субботние концерты.
     end_attr = f' data-end="{ev["ends_at"]}"' if ev.get("ends_at") else ""
+    start_attr = f' data-start="{ev["starts_at"]}"' if ev.get("starts_at") else ""
     price = ev["price"] or ("Бесплатно" if ev["flags"]["free"] else "Цена на сайте")
     # Возрастная маркировка (436-ФЗ) — рядом с ценой, чтобы была видна сразу.
     if ev.get("age"):
         price = f"{price} · {ev['age']}"
-    link_label = ("Подробнее <span aria-hidden=\"true\">→</span>" if ev["flags"]["free"]
-                  else "Билеты и подробности <span aria-hidden=\"true\">→</span>")
+    # Участники теста не понимали, что ссылка уводит на чужой сайт: подписываем
+    # переход словами и значком внешней ссылки.
+    # Ссылка ведёт не всегда на сайт организатора: это может быть группа во
+    # «ВКонтакте», билетный сервис или другой агрегатор. Поэтому говорим
+    # «страница источника», не обещая, кто именно её ведёт.
+    link_label = ("Подробнее на странице источника "
+                  "<span aria-hidden=\"true\">↗</span>" if ev["flags"]["free"]
+                  else "Билеты на странице источника <span aria-hidden=\"true\">↗</span>")
+    open_hint = f"Открыть страницу источника: {ev['title']}"
     return f"""
-<article class="card" {attrs}{day_attr}{end_attr} data-district="{esc(ev['district'])}" data-geo="{esc(ev['area'])}">
-  <a class="card__media" href="{esc(ev['url'])}" target="_blank" rel="noopener nofollow">
+<article class="card" {attrs}{day_attr}{end_attr}{start_attr} data-district="{esc(ev['district'])}" data-geo="{esc(ev['area'])}">
+  <a class="card__media" href="{esc(ev['url'])}" target="_blank" rel="noopener nofollow" title="{esc(open_hint)}">
     {image_html}
   </a>
   <div class="card__body">
@@ -612,7 +620,8 @@ def llms_txt(events: list[dict], articles: list | None = None) -> str:
         "## Что в карточке",
         "Дата и время, площадка и район, цена (минимальная, со словом «от»), "
         "возрастная маркировка по данным организатора, описание события и ссылка "
-        "на страницу организатора, где можно узнать подробности и купить билет.",
+        "на страницу источника — сайт организатора, билетный сервис или сообщество, "
+        "где указаны подробности.",
         "",
         "## Чего на сайте нет",
         "Сайт не продаёт билеты и не собирает персональные данные. Афиши не хранятся "
@@ -1128,13 +1137,16 @@ h2{font-size:20px;margin:32px 0 12px}
   padding:7px 14px;font-size:14px;cursor:pointer;font-family:inherit}
 a.chip{display:inline-flex;align-items:center;text-decoration:none}
 .chip[aria-pressed="true"],.chip[aria-current="page"]{background:var(--accent);border-color:var(--accent);color:#fff}
-.chip--free{border-color:var(--accent);color:var(--accent);font-weight:600}
+.chip--free{font-weight:600}
 .chip--free[aria-pressed="true"],.chip--free[aria-current="page"]{background:var(--accent);border-color:var(--accent);color:#fff}
 .controls__divider{width:1px;height:22px;background:var(--line);margin:0 4px}
 select{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
   padding:7px 12px;font-size:14px;font-family:inherit}
 .count{margin-left:auto;color:var(--muted);font-size:14px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:22px;margin-top:26px}
+@keyframes gridFlash{from{opacity:.3}to{opacity:1}}
+.grid--flash{animation:gridFlash .3s ease-out}
+@media (prefers-reduced-motion: reduce){.grid--flash{animation:none}}
 /* атрибут hidden должен побеждать display:flex у .card, иначе фильтры не скрывают карточки */
 [hidden]{display:none !important}
 .card{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg)}
@@ -1187,6 +1199,7 @@ footer{margin-top:32px;color:var(--muted);font-size:13px}
 JS = """
 const params = new URLSearchParams(location.search);
 const cards = [...document.querySelectorAll('.card')];
+const gridEl = document.querySelector('.grid');
 const chips = [...document.querySelectorAll('.chip[data-filter]')];
 const dayChips = [...document.querySelectorAll('.chip[data-day]')];
 // Список площадок: на каталоге это районы города, на «За городом» —
@@ -1287,10 +1300,11 @@ function updatePast(past){
   pastToggle.setAttribute('aria-pressed', String(showPast));
 }
 
-function apply(){
+function apply(animate){
   const z = zone ? zone.value : '';
   const zoneSel = zoneOf(z);
   let shown = 0, past = 0;
+  const visibleCards = [];
   for (const card of cards){
     const okFlags = [...active].every(k => card.dataset[k] === 'true');
     const okZone = !z || (card.dataset[zoneSel.field] || '') === zoneSel.name;
@@ -1302,9 +1316,30 @@ function apply(){
     const visible = matches && (!gone || showPast);
     card.hidden = !visible;
     card.style.display = visible ? '' : 'none';
-    if (visible) shown++;
+    if (visible) { shown++; visibleCards.push(card); }
   }
-  if (counter) counter.textContent = shown + ' ' + plural(shown);
+
+  // Участники теста принимали неизменный порядок за сломанные фильтры:
+  // первая пара карточек подходила под любой фильтр и оставалась на месте.
+  // Пересобираем сетку по времени начала и подсвечиваем, что выдача изменилась.
+  if (gridEl){
+    visibleCards.sort((a, b) =>
+      (a.dataset.start || a.dataset.end || '').localeCompare(b.dataset.start || b.dataset.end || '')
+    );
+    for (const card of visibleCards) gridEl.appendChild(card);
+    for (const card of cards) if (card.hidden) gridEl.appendChild(card);
+    if (animate){
+      gridEl.classList.remove('grid--flash');
+      void gridEl.offsetWidth;
+      gridEl.classList.add('grid--flash');
+    }
+  }
+
+  if (counter) {
+    counter.textContent = shown === cards.length
+      ? shown + ' ' + plural(shown)
+      : shown + ' из ' + cards.length;
+  }
   if (empty) empty.style.display = shown || past ? 'none' : 'block';
   updatePast(past);
   syncUrl();
@@ -1322,20 +1357,20 @@ chips.forEach(chip => chip.addEventListener('click', (e) => {
     active.add(key);
     chip.setAttribute('aria-current', 'page');
   }
-  apply();
+  apply(true);
   track('filter', key);
 }));
 
 dayChips.forEach(chip => chip.addEventListener('click', () => {
   day = day === chip.dataset.day ? '' : chip.dataset.day;
   syncDayChips();
-  apply();
+  apply(true);
   track('day', day || 'both');
 }));
 
 if (zone) {
   zone.addEventListener('change', () => {
-    apply();
+    apply(true);
     track(zoneKey, zone.value || 'all');
   });
 }
@@ -1343,7 +1378,7 @@ if (zone) {
 if (pastToggle) {
   pastToggle.addEventListener('click', () => {
     showPast = !showPast;
-    apply();
+    apply(true);
     track('past', showPast ? 'show' : 'hide');
   });
 }
@@ -1380,7 +1415,7 @@ document.querySelectorAll('[data-reset]').forEach(btn => btn.addEventListener('c
   chips.forEach(chip => chip.removeAttribute('aria-current'));
   syncDayChips();
   if (zone) zone.value = '';
-  apply();
+  apply(true);
 }));
 
 apply();
