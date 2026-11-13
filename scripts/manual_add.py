@@ -23,6 +23,15 @@
 описание. Несколько событий в одном файле разделяются строкой «---».
 Файлы, имя которых начинается с «_», не читаются: там лежит шаблон.
 
+Скопированные из ВК посты (файл из строк «1. Источник …», «Изображение …»,
+шапки и текста) в таком виде не разбираются: сначала их переводят в поля —
+
+    python scripts/manual_add.py --from-vk "content/manual/dump.txt"
+
+скрипт положит рядом черновик `dump-vk.txt`: площадка, адрес, дата, время,
+цена и картинка берутся из поста, заголовок — из первой строки (его нужно
+поправить руками).
+
 Запуск:
     python scripts/manual_add.py                          # всё из content/manual
     python scripts/manual_add.py content/manual/park.txt --dry-run
@@ -41,6 +50,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from common import dates as dts  # noqa: E402
 from common import http, model, sheets  # noqa: E402
 
 MANUAL_DIR = ROOT / "content" / "manual"
@@ -88,6 +98,224 @@ def apply_price_guard(ev: dict) -> dict:
     if _PAID.search(ev.get("price_text") or ""):
         ev["is_free"] = False
     return ev
+
+
+# --- Выгрузка постов «ВКонтакте» -------------------------------------------
+# Так выглядит файл после копирования нескольких постов подряд: номер, строка
+# «Источник», строка «Изображение», дальше шапка (площадка, адрес, название)
+# и текст поста. Порядок и состав строк в шапке у разных сообществ свои,
+# поэтому разбирать такой файл как анонс нельзя: получаются события с пустой
+# площадкой и заголовком из времени. Сначала он переводится в формат
+# «ключ: значение» (--from-vk), а дальше разбирается как обычный текст.
+
+_POST_START = re.compile(r"(?m)^\s*\d{1,2}[.)]\s*Источник\s+(\S+)")
+_IMAGE_LINE = re.compile(r"(?m)^\s*Изображение\s+(\S+)")
+_STREET = re.compile(
+    r"(?:ул\.|улица|проспект|пр-т|пр\.|набережная|площадь|переулок|шоссе|бульвар)"
+    r"\s*\S+",
+    re.IGNORECASE,
+)
+# «Музей космонавтики имени Ю.В. Кондратюка Советская, 24» → название и адрес.
+_VENUE_ADDRESS = re.compile(
+    r"^(.*?)\s+((?:[А-ЯЁ][а-яё]+(?:-[А-ЯЁа-яё]+)?),\s*\d+\S*)\s*\.?$"
+)
+_EMOJI = re.compile(
+    "[\U0001F000-\U0001FAFF\u2190-\u21FF\u2300-\u27BF\u2B00-\u2BFF\uFE0F\u200d]"
+)
+_TIME_NAMED = re.compile(r"начало\s+в\s+(\d{1,2}[:.]\d{2})", re.IGNORECASE)
+_TIME_RANGE = re.compile(
+    r"с\s+(\d{1,2}[:.]\d{2})\s+до\s+(\d{1,2}[:.]\d{2})", re.IGNORECASE
+)
+_TIME_DASH = re.compile(r"(\d{1,2}[:.]\d{2})\s*[—–-]\s*(\d{1,2}[:.]\d{2})")
+_TIME_LABEL = re.compile(
+    r"время[^:\n]{0,12}[:\-—]\s*(?:с\s+)?(\d{1,2}[:.]\d{2})"
+    r"(?:\s*до\s*(\d{1,2}[:.]\d{2}))?",
+    re.IGNORECASE,
+)
+_TIME_AT = re.compile(r"\bв\s+(\d{1,2}[:.]\d{2})")
+_PRICE_LINE = re.compile(
+    r"(?:стоимость|цена|билет\w*)[^:\n]{0,30}[:\-—]\s*([^\n]{1,90})", re.IGNORECASE
+)
+_ENTRY_LINE = re.compile(
+    r"вход[^:\n]{0,20}[:\-—]?\s*(свободн\w*|бесплатн\w*|платн\w*)", re.IGNORECASE
+)
+_PLACE_LABEL = re.compile(r"(?:место|где)\s*[?:]\s*([^\n]{3,90})", re.IGNORECASE)
+_IN_BRACKETS = re.compile(r"\(([^)]*\d[^)]*)\)")
+_ADDRESS_SHORT = re.compile(
+    r"([А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁа-яё-]+)?),\s*\d+\S*$"
+)
+
+
+def is_vk_dump(raw: str) -> bool:
+    """В файле несколько постов ВК подряд, а не один анонс с полями."""
+    return len(_POST_START.findall(raw)) >= 2
+
+
+def _clean(line: str) -> str:
+    return re.sub(r"\s{2,}", " ", _EMOJI.sub("", line)).strip(" -—–·|")
+
+
+def _time_from(text: str) -> str:
+    """Время начала из живого текста: «в 16:00», «с 12:00 до 18:00»."""
+    match = _TIME_NAMED.search(text)
+    if match:
+        return match.group(1).replace(".", ":")
+    for pattern in (_TIME_RANGE, _TIME_DASH):
+        match = pattern.search(text)
+        if match:
+            start, end = (part.replace(".", ":") for part in match.groups())
+            return f"{start}–{end}"
+    match = _TIME_LABEL.search(text)
+    if match:
+        start = match.group(1).replace(".", ":")
+        end = (match.group(2) or "").replace(".", ":")
+        return f"{start}–{end}" if end else start
+    match = _TIME_AT.search(text)
+    if match:
+        return match.group(1).replace(".", ":")
+    return ""
+
+
+def _price_from(text: str) -> str:
+    """Цена или «Бесплатно»: «Стоимость участия — 1 100 ₽», «Вход свободный»."""
+    match = _PRICE_LINE.search(text)
+    if match:
+        value = _clean(match.group(1))
+        for stop in (".", "(", "!", "/"):
+            value = value.split(stop)[0].strip()
+        if re.search(r"\d", value):
+            return value
+    match = _ENTRY_LINE.search(text)
+    if match:
+        word = match.group(1).lower()
+        return "Бесплатно" if ("свободн" in word or "бесплатн" in word) else "Вход платный"
+    return ""
+
+
+def _post_header(lines: list[str]) -> tuple[str, str, list[str]]:
+    """Шапка поста → (площадка, адрес, остальные строки)."""
+    venue = address = ""
+    index = 0
+    if index < len(lines):
+        first = lines[index]
+        if "\t" in first:
+            parts = [part.strip() for part in first.split("\t") if part.strip()]
+            venue, address = parts[0], (parts[1] if len(parts) > 1 else "")
+        elif " | " in first:
+            venue, address = (part.strip() for part in first.split(" | ", 1))
+        else:
+            venue = first
+        index += 1
+        if not address:
+            merged = _VENUE_ADDRESS.match(venue)
+            if merged:
+                venue, address = merged.group(1).strip(), merged.group(2).strip()
+        # Адрес отдельной строкой: «улица Ленина, 71, Новосибирск».
+        if index < len(lines) and _STREET.search(lines[index]):
+            address = lines[index]
+            index += 1
+    return venue, address, lines[index:]
+
+
+def vk_posts(raw: str) -> list[dict]:
+    """Посты ВК из файла: ссылка, картинка и строки после шапки."""
+    marks = list(_POST_START.finditer(raw))
+    posts: list[dict] = []
+    for number, mark in enumerate(marks):
+        end = marks[number + 1].start() if number + 1 < len(marks) else len(raw)
+        chunk = raw[mark.end():end]
+        image = _IMAGE_LINE.search(chunk)
+        body = chunk[image.end():] if image else chunk
+        posts.append({
+            "url": mark.group(1).rstrip(".,;"),
+            "image": image.group(1).rstrip(".,;") if image else "",
+            "lines": [line.strip() for line in body.splitlines() if line.strip()],
+        })
+    return posts
+
+
+def _all_dates(text: str) -> list[str]:
+    """Все даты поста по порядку: «15 ноября», «21 ноября»."""
+    pattern = re.compile(r"(\d{1,2})\s*(" + dts.MONTH_PATTERN + r")\b", re.IGNORECASE)
+    seen: list[str] = []
+    for match in pattern.finditer(text):
+        value = f"{match.group(1)} {match.group(2)}"
+        if value.lower() not in (item.lower() for item in seen):
+            seen.append(value)
+    return seen
+
+
+def vk_block(post: dict, today: date) -> dict | None:
+    """Один пост ВК → поля карточки. Заголовок черновой: первая строка поста."""
+    venue, address, rest = _post_header(post["lines"])
+    text = "\n".join(rest)
+    if not rest:
+        return None
+    if not address:
+        place = _PLACE_LABEL.search(text)
+        if place:
+            venue = _clean(place.group(1))
+            inside = _IN_BRACKETS.search(venue)
+            if inside:
+                address = _clean(inside.group(1))
+                venue = _clean(_IN_BRACKETS.sub("", venue))
+    address = address.rstrip(" .")
+    # «Музыкальное пространство Нарымская улица, 25» → «Нарымская улица, 25».
+    if len(address.split()) > 3:
+        tail = _ADDRESS_SHORT.search(address)
+        if tail:
+            address = tail.group(1) + address[tail.end(1):]
+    # Дата: выходные важнее прочих упоминаний («записаться до 13 ноября»),
+    # из одинаково подходящих берём ближайшую.
+    upcoming, weekend = [], []
+    for raw_date in _all_dates(text):
+        period = dts.parse_period(raw_date, today)
+        if not period.start or period.start < today:
+            continue
+        upcoming.append((raw_date, period.start))
+        if dts.is_weekend_relevant(raw_date, today):
+            weekend.append((raw_date, period.start))
+    if not upcoming:
+        return None
+    chosen = sorted(weekend or upcoming, key=lambda item: item[1])
+    date_raw = chosen[0][0]
+    others = [raw for raw, _ in upcoming if raw != date_raw]
+    day, month = date_raw.split()[0], date_raw.split()[1][:4]
+    same_date = re.compile(rf"\b{day}\s*{month}", re.IGNORECASE)
+    line_for_date = next((line for line in rest if same_date.search(line)), text)
+    first = _clean(rest[0])
+    title = first if len(first) <= 80 else first[:80].rsplit(" ", 1)[0] + "…"
+    body = [line for line in rest if _clean(line) != first]
+    if others:
+        body.append("Другие даты: " + ", ".join(others) + ".")
+    return {
+        "title": title,
+        "date_raw": date_raw,
+        "time_text": _time_from(line_for_date) or _time_from(text),
+        "venue": _clean(venue),
+        "address": address,
+        "price_text": _price_from(text),
+        "source_url": post["url"],
+        "image_url": post["image"],
+        "body": "\n".join(body),
+    }
+
+
+def vk_to_blocks(raw: str, today: date) -> tuple[str, int]:
+    """Файл выгрузки → текст в формате «ключ: значение», по блоку на событие."""
+    blocks: list[str] = []
+    for post in vk_posts(raw):
+        block = vk_block(post, today)
+        if not block:
+            continue
+        head = [f"title: {block['title']}", f"date: {block['date_raw']}"]
+        for key, field in (("time", "time_text"), ("venue", "venue"),
+                           ("address", "address"), ("price", "price_text"),
+                           ("url", "source_url"), ("image", "image_url")):
+            if block[field]:
+                head.append(f"{key}: {block[field]}")
+        blocks.append("\n".join(head) + "\n\n" + block["body"].strip() + "\n")
+    return "\n---\n".join(blocks), len(blocks)
 
 
 _OG_IMAGE = re.compile(
@@ -243,7 +471,11 @@ def split_block(block: str) -> tuple[dict[str, str], str]:
 
 def read_file(path: Path, source: str) -> list[dict]:
     raw = path.read_text(encoding="utf-8-sig")
-    if DATE_MARK in raw:
+    # Файл с явными полями читается построчно, даже если в описании остался
+    # значок календаря: иначе строки «📅 21 ноября» из текста поста становятся
+    # отдельными событиями с временем вместо названия.
+    explicit = re.match(r"\s*(?:title|название|событие)\s*:", raw, re.IGNORECASE)
+    if not explicit and DATE_MARK in raw:
         events = read_announcement(raw, source)
         if events:
             return events
@@ -306,9 +538,35 @@ def main(argv=None) -> int:
     parser.add_argument("--date", help="считать эту дату сегодняшней (YYYY-MM-DD)")
     parser.add_argument("--dry-run", action="store_true",
                         help="только показать, что получится, в таблицу не писать")
+    parser.add_argument("--from-vk", metavar="FILE",
+                        help="перевести выгрузку постов ВК в формат «ключ: значение»")
+    parser.add_argument("--out", help="куда положить результат --from-vk")
     args = parser.parse_args(argv)
 
     today = date.fromisoformat(args.date) if args.date else date.today()
+
+    if args.from_vk:
+        source = Path(args.from_vk)
+        if not source.is_file():
+            print(f"[-] Нет файла: {source}")
+            return 1
+        blocks, count = vk_to_blocks(
+            source.read_text(encoding="utf-8-sig"), today
+        )
+        if not count:
+            print("[-] В выгрузке не нашлось ни одного поста с датой")
+            return 1
+        target = Path(args.out) if args.out else source.with_name(source.stem + "-vk.txt")
+        if args.dry_run:
+            print(blocks)
+            print(f"\n[i] --dry-run: событий {count}, файл не записан")
+            return 0
+        target.write_text(blocks + "\n", encoding="utf-8")
+        print(f"[+] Событий: {count}. Черновик: {target}")
+        print("[i] Проверьте заголовки (взяты из первой строки поста) и адрес, "
+              "затем запустите разбор как обычно.")
+        return 0
+
     files = manual_files(args.paths)
     if not files:
         print("[-] Не нашёл ни одного текста: положите файл в content/manual/")
@@ -316,12 +574,30 @@ def main(argv=None) -> int:
 
     events: list[dict] = []
     for path in files:
+        raw = path.read_text(encoding="utf-8-sig")
+        if is_vk_dump(raw):
+            print(f"[!] {path.name}: похоже на выгрузку постов ВК — такой файл "
+                  f"не разбираю, иначе получаются события без площадки и с временем "
+                  f"вместо названия.\n    Сначала: python scripts/manual_add.py "
+                  f"--from-vk \"{path}\"")
+            continue
         batch = read_file(path, args.source)
         if not batch:
             print(f"[!] {path.name}: в шапке нет строки «title:» — пропускаю")
             continue
         print(f"[+] {path.name}: событий {len(batch)}")
         events += batch
+
+    if not events:
+        return 1
+
+    # Один анонс с несколькими датами даёт строки с одинаковым id (id считается
+    # от источника, ссылки и названия). В таблицу такая пара уходит дублем.
+    unique: dict[str, dict] = {ev["id"]: ev for ev in events}
+    if len(unique) != len(events):
+        print(f"[!] Одинаковых событий в пачке: {len(events) - len(unique)} — "
+              f"оставляю по одному")
+        events = list(unique.values())
 
     if not events:
         return 1
