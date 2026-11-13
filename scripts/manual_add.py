@@ -24,13 +24,14 @@
 Файлы, имя которых начинается с «_», не читаются: там лежит шаблон.
 
 Скопированные из ВК посты (файл из строк «1. Источник …», «Изображение …»,
-шапки и текста) в таком виде не разбираются: сначала их переводят в поля —
+шапки и текста) разбираются сами: файл режется по постам, площадка, адрес,
+дата, время, цена и картинка берутся из текста, заголовок — из первой строки
+поста (приветствие пропускается). Заголовок черновой, его правят в таблице.
+Если черновик нужно посмотреть до записи —
 
     python scripts/manual_add.py --from-vk "content/manual/dump.txt"
 
-скрипт положит рядом черновик `dump-vk.txt`: площадка, адрес, дата, время,
-цена и картинка берутся из поста, заголовок — из первой строки (его нужно
-поправить руками).
+положит рядом `dump-vk.txt` в формате «ключ: значение».
 
 Запуск:
     python scripts/manual_add.py                          # всё из content/manual
@@ -143,6 +144,12 @@ _PLACE_LABEL = re.compile(r"(?:место|где)\s*[?:]\s*([^\n]{3,90})", re.IG
 _IN_BRACKETS = re.compile(r"\(([^)]*\d[^)]*)\)")
 _ADDRESS_SHORT = re.compile(
     r"([А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁа-яё-]+)?),\s*\d+\S*$"
+)
+# Строка-приветствие: названием она не годится, берём следующую.
+_GREETING = re.compile(
+    r"^(?:(?:дорогие|уважаемые|милые)\s+)?(?:друзья|коллеги|гости|читатели)[!.,]?$"
+    r"|^(?:привет|здравствуйте|внимание|добрый\s+(?:день|вечер))[!.,]?$",
+    re.IGNORECASE,
 )
 
 
@@ -283,9 +290,12 @@ def vk_block(post: dict, today: date) -> dict | None:
     day, month = date_raw.split()[0], date_raw.split()[1][:4]
     same_date = re.compile(rf"\b{day}\s*{month}", re.IGNORECASE)
     line_for_date = next((line for line in rest if same_date.search(line)), text)
-    first = _clean(rest[0])
+    title_index = 0
+    while title_index < len(rest) - 1 and _GREETING.match(_clean(rest[title_index])):
+        title_index += 1
+    first = _clean(rest[title_index])
     title = first if len(first) <= 80 else first[:80].rsplit(" ", 1)[0] + "…"
-    body = [line for line in rest if _clean(line) != first]
+    body = [line for position, line in enumerate(rest) if position != title_index]
     if others:
         body.append("Другие даты: " + ", ".join(others) + ".")
     return {
@@ -469,8 +479,17 @@ def split_block(block: str) -> tuple[dict[str, str], str]:
     return fields, "\n".join(lines[body_start:]).strip()
 
 
-def read_file(path: Path, source: str) -> list[dict]:
+def read_file(path: Path, source: str, today: date | None = None) -> list[dict]:
     raw = path.read_text(encoding="utf-8-sig")
+    # Выгрузка постов ВК: несколько анонсов подряд. Переводим её в поля
+    # на лету — молча разбирать как один анонс нельзя, иначе площадкой
+    # становится номер поста, а названием — время.
+    if not re.match(r"\s*(?:title|название|событие)\s*:", raw, re.IGNORECASE) \
+            and is_vk_dump(raw):
+        blocks, count = vk_to_blocks(raw, today or date.today())
+        print(f"[i] {path.name}: выгрузка постов ВК, событий {count}; "
+              f"заголовки черновые — поправьте их в таблице")
+        raw = blocks
     # Файл с явными полями читается построчно, даже если в описании остался
     # значок календаря: иначе строки «📅 21 ноября» из текста поста становятся
     # отдельными событиями с временем вместо названия.
@@ -574,16 +593,9 @@ def main(argv=None) -> int:
 
     events: list[dict] = []
     for path in files:
-        raw = path.read_text(encoding="utf-8-sig")
-        if is_vk_dump(raw):
-            print(f"[!] {path.name}: похоже на выгрузку постов ВК — такой файл "
-                  f"не разбираю, иначе получаются события без площадки и с временем "
-                  f"вместо названия.\n    Сначала: python scripts/manual_add.py "
-                  f"--from-vk \"{path}\"")
-            continue
-        batch = read_file(path, args.source)
+        batch = read_file(path, args.source, today)
         if not batch:
-            print(f"[!] {path.name}: в шапке нет строки «title:» — пропускаю")
+            print(f"[!] {path.name}: не разобрал ни одного события — пропускаю")
             continue
         print(f"[+] {path.name}: событий {len(batch)}")
         events += batch
