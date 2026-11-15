@@ -45,6 +45,8 @@ h2{font-size:20px;margin:32px 0 12px}
   padding:7px 14px;font-size:14px;cursor:pointer;font-family:inherit}
 a.chip{display:inline-flex;align-items:center;text-decoration:none}
 .chip[aria-pressed="true"],.chip[aria-current="page"]{background:var(--accent);border-color:var(--accent);color:#fff}
+/* Дубль «Бесплатно» в верхней строке: до воскресенья он не нужен и скрыт. */
+.chip.chip--top{display:none}
 select{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
   padding:7px 12px;font-size:14px;font-family:inherit}
 .count{margin-left:auto;color:var(--muted);font-size:14px}
@@ -102,6 +104,15 @@ footer{margin-top:32px;color:var(--muted);font-size:13px}
      включены, под ней остаются только они и «Сбросить», чтобы было видно,
      почему выдача короткая. */
   .filters-toggle{display:inline-flex}
+  /* В воскресенье «Субботы» в строке нет, и сразу за «Воскресеньем» встаёт
+     «Бесплатно»: до шторки не надо раскрывать, чтобы отобрать бесплатное. */
+  .controls[data-sunday="true"] .chip.chip--top{display:inline-flex}
+  /* В воскресенье в строке на одну метку больше: ужимаем её и счётчик,
+     иначе счётчик уезжает за правый край на 360–390 px. */
+  .controls[data-sunday="true"] .controls__row--top{gap:4px}
+  .controls[data-sunday="true"] .controls__row--top .chip{padding:0 10px;font-size:12px}
+  .controls[data-sunday="true"] .count{font-size:12px;min-width:0;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
   .controls__row--top{gap:5px}
   /* Цель для пальца не меньше 44 px — как у остальных чипов и кнопки шторки. */
   .controls__row--top .chip{display:inline-flex;align-items:center;min-height:44px;

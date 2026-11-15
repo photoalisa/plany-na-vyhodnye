@@ -46,6 +46,27 @@ chips.forEach(chip => {
 
 // день выходных: пусто — оба дня, иначе 'sat' или 'sun'
 let day = ['sat', 'sun'].includes(params.get('day')) ? params.get('day') : '';
+
+// В воскресенье субботние события уже прошли: кнопку «Суббота» убираем и
+// показываем только воскресенье. День считаем по Новосибирску, а не по часам
+// посетителя: страница собрана одна для всех, и часовой пояс у людей разный.
+function isSundayInNovosibirsk(){
+  try {
+    const weekday = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Novosibirsk',
+      weekday: 'short',
+    }).format(new Date());
+    return weekday === 'Sun';
+  } catch (e) {
+    return false;
+  }
+}
+if (isSundayInNovosibirsk()){
+  const satChip = dayChips.find(chip => chip.dataset.day === 'sat');
+  if (satChip) satChip.hidden = true;
+  if (!day) day = 'sun';
+  if (controlsEl) controlsEl.dataset.sunday = 'true';
+}
 function syncDayChips(){
   dayChips.forEach(c => c.setAttribute('aria-pressed', String(c.dataset.day === day)));
 }
@@ -171,11 +192,15 @@ chips.forEach(chip => chip.addEventListener('click', (e) => {
   const key = chip.dataset.filter;
   if (active.has(key)){
     active.delete(key);
-    chip.removeAttribute('aria-current');
   } else {
     active.add(key);
-    chip.setAttribute('aria-current', 'page');
   }
+  // Одна метка может стоять дважды: в верхней строке на телефоне и в шторке.
+  // Подсветку переносим на все копии, иначе непонятно, включён фильтр или нет.
+  chips.filter(c => c.dataset.filter === key).forEach(c => {
+    if (active.has(key)) c.setAttribute('aria-current', 'page');
+    else c.removeAttribute('aria-current');
+  });
   apply(true);
   track('filter', key);
 }));
@@ -240,7 +265,8 @@ if (article) {
 
 document.querySelectorAll('[data-reset]').forEach(btn => btn.addEventListener('click', () => {
   active.clear();
-  day = '';
+  // В воскресенье «оба дня» уже не имеет смысла: суббота прошла.
+  day = controlsEl && controlsEl.dataset.sunday === 'true' ? 'sun' : '';
   showPast = false;
   chips.forEach(chip => chip.removeAttribute('aria-current'));
   syncDayChips();
