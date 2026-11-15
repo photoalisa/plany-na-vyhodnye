@@ -45,7 +45,7 @@ jobs:
           fi
           printf '%s' "$GOOGLE_CREDENTIALS" > credentials.json
 
-      - name: Браузер для МЕГИ
+      - name: Браузер для МЕГИ и culture.ru
         continue-on-error: true
         run: python -m playwright install --with-deps chromium
 
