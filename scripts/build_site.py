@@ -691,6 +691,9 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
             '<div class="controls" data-open="false" data-active="false">'
             '<div class="controls__row controls__row--top">'
             + day_chips_html()
+            # Дубль «Бесплатно» для верхней строки: виден только на телефоне
+            # и только в воскресенье, когда кнопки «Суббота» рядом уже нет.
+            + '<a class="chip chip--top" href="/besplatno/" data-filter="free">Бесплатно</a>'
             + f'<span class="count" role="status" aria-live="polite" aria-atomic="true">'
               f'<span data-count>{len(events)}</span></span>'
             + '<button class="filters-toggle" type="button" aria-expanded="false" '
@@ -1215,6 +1218,8 @@ h2{font-size:20px;margin:32px 0 12px}
   padding:7px 14px;font-size:14px;cursor:pointer;font-family:inherit}
 a.chip{display:inline-flex;align-items:center;text-decoration:none}
 .chip[aria-pressed="true"],.chip[aria-current="page"]{background:var(--accent);border-color:var(--accent);color:#fff}
+/* Дубль «Бесплатно» в верхней строке: до воскресенья он не нужен и скрыт. */
+.chip.chip--top{display:none}
 select{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
   padding:7px 12px;font-size:14px;font-family:inherit}
 .count{margin-left:auto;color:var(--muted);font-size:14px}
@@ -1272,6 +1277,15 @@ footer{margin-top:32px;color:var(--muted);font-size:13px}
      включены, под ней остаются только они и «Сбросить», чтобы было видно,
      почему выдача короткая. */
   .filters-toggle{display:inline-flex}
+  /* В воскресенье «Субботы» в строке нет, и сразу за «Воскресеньем» встаёт
+     «Бесплатно»: до шторки не надо раскрывать, чтобы отобрать бесплатное. */
+  .controls[data-sunday="true"] .chip.chip--top{display:inline-flex}
+  /* В воскресенье в строке на одну метку больше: ужимаем её и счётчик,
+     иначе счётчик уезжает за правый край на 360–390 px. */
+  .controls[data-sunday="true"] .controls__row--top{gap:4px}
+  .controls[data-sunday="true"] .controls__row--top .chip{padding:0 10px;font-size:12px}
+  .controls[data-sunday="true"] .count{font-size:12px;min-width:0;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
   .controls__row--top{gap:5px}
   /* Цель для пальца не меньше 44 px — как у остальных чипов и кнопки шторки. */
   .controls__row--top .chip{display:inline-flex;align-items:center;min-height:44px;
@@ -1357,6 +1371,27 @@ chips.forEach(chip => {
 
 // день выходных: пусто — оба дня, иначе 'sat' или 'sun'
 let day = ['sat', 'sun'].includes(params.get('day')) ? params.get('day') : '';
+
+// В воскресенье субботние события уже прошли: кнопку «Суббота» убираем и
+// показываем только воскресенье. День считаем по Новосибирску, а не по часам
+// посетителя: страница собрана одна для всех, и часовой пояс у людей разный.
+function isSundayInNovosibirsk(){
+  try {
+    const weekday = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Novosibirsk',
+      weekday: 'short',
+    }).format(new Date());
+    return weekday === 'Sun';
+  } catch (e) {
+    return false;
+  }
+}
+if (isSundayInNovosibirsk()){
+  const satChip = dayChips.find(chip => chip.dataset.day === 'sat');
+  if (satChip) satChip.hidden = true;
+  if (!day) day = 'sun';
+  if (controlsEl) controlsEl.dataset.sunday = 'true';
+}
 function syncDayChips(){
   dayChips.forEach(c => c.setAttribute('aria-pressed', String(c.dataset.day === day)));
 }
@@ -1482,11 +1517,15 @@ chips.forEach(chip => chip.addEventListener('click', (e) => {
   const key = chip.dataset.filter;
   if (active.has(key)){
     active.delete(key);
-    chip.removeAttribute('aria-current');
   } else {
     active.add(key);
-    chip.setAttribute('aria-current', 'page');
   }
+  // Одна метка может стоять дважды: в верхней строке на телефоне и в шторке.
+  // Подсветку переносим на все копии, иначе непонятно, включён фильтр или нет.
+  chips.filter(c => c.dataset.filter === key).forEach(c => {
+    if (active.has(key)) c.setAttribute('aria-current', 'page');
+    else c.removeAttribute('aria-current');
+  });
   apply(true);
   track('filter', key);
 }));
@@ -1551,7 +1590,8 @@ if (article) {
 
 document.querySelectorAll('[data-reset]').forEach(btn => btn.addEventListener('click', () => {
   active.clear();
-  day = '';
+  // В воскресенье «оба дня» уже не имеет смысла: суббота прошла.
+  day = controlsEl && controlsEl.dataset.sunday === 'true' ? 'sun' : '';
   showPast = false;
   chips.forEach(chip => chip.removeAttribute('aria-current'));
   syncDayChips();
