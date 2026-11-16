@@ -38,6 +38,9 @@ CREDENTIALS = "credentials.json"
 BATCH = 200
 UPDATE_BATCH = 100
 RETRY_DELAYS = (5, 10, 20, 40)
+# Доступ к googleapis.com бывает недоступен или сильно тормозит:
+# без явного таймаута запрос висит бесконечно (read timeout=None).
+SHEETS_TIMEOUT = 30
 
 
 def _fmt(value) -> str:
@@ -105,6 +108,7 @@ class SheetStore:
             import gspread
 
             client = gspread.service_account(filename=creds)
+            client.set_timeout(SHEETS_TIMEOUT)
             self.book = client.open(name)
             self.sheet = self._open_data_sheet()
             self._ensure_header()
@@ -516,6 +520,7 @@ def read_table(name: str = SHEET_NAME, creds: str = CREDENTIALS,
     import gspread
 
     client = gspread.service_account(filename=creds)
+    client.set_timeout(SHEETS_TIMEOUT)
     book = client.open(name)
 
     if tab:
