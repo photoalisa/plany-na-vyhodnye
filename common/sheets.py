@@ -23,6 +23,10 @@ from .model import COLUMNS
 SHEET_NAME = "nsk_weekend"
 DATA_TAB = "events"
 RUNS_TAB = "runs"
+# Неактивные события (archived, cancelled, rescheduled) не держим в рабочем
+# листе: они не нужны ни сборке сайта, ни модерации, но остаются в книге
+# на отдельном листе, чтобы историю можно было посмотреть.
+ARCHIVE_TAB = "archive"
 # Снимок того, что парсер предлагал в прошлый раз: по нему видно, какие
 # ячейки человек правил руками, и такие правки не затираются.
 BASE_TAB = "parsed"
@@ -391,6 +395,56 @@ class SheetStore:
             self._save_base()
             self._load_index()
         return len(updates)
+
+    # ------------------------------------------------------------- архив
+    def _archive_worksheet(self):
+        """Лист archive: создаётся при первом переносе, шапка как у events."""
+        titles = {ws.title for ws in self.book.worksheets()}
+        if ARCHIVE_TAB in titles:
+            return self.book.worksheet(ARCHIVE_TAB)
+        ws = _retry(self.book.add_worksheet, title=ARCHIVE_TAB,
+                    rows=5000, cols=len(COLUMNS))
+        _retry(ws.append_row, COLUMNS, value_input_option="USER_ENTERED")
+        return ws
+
+    def move_inactive(self, dry_run: bool = False) -> int:
+        """Переносит неактивные строки из events в лист archive.
+
+        Сначала копируем в архив, только потом удаляем из рабочего листа:
+        если запись в архив не удалась, данные остаются на месте.
+        Сборке и модерации неактивные строки не нужны, а история сохраняется.
+        """
+        if self.sheet is None:
+            return 0
+        status_idx = COLUMNS.index("status")
+        inactive = {"archived", "cancelled", "rescheduled"}
+        targets: list[tuple[int, list]] = []
+        for idx, row in enumerate(self.rows[1:], start=2):
+            if not row or not row[0].strip():
+                continue
+            status = (row[status_idx] if len(row) > status_idx else "active").strip()
+            if status in inactive:
+                targets.append((idx, row))
+        if not targets:
+            return 0
+        if dry_run:
+            print(f"[dry-run] в лист {ARCHIVE_TAB} уйдёт строк: {len(targets)}")
+            return len(targets)
+
+        width = len(COLUMNS)
+        payload = [
+            [_fmt(cell) for cell in (row + [""] * width)[:width]]
+            for _, row in targets
+        ]
+        ws = self._archive_worksheet()
+        for start in range(0, len(payload), BATCH):
+            _retry(ws.append_rows, payload[start:start + BATCH],
+                   value_input_option="USER_ENTERED")
+        # Снизу вверх: после удаления строки номера ниже сдвигаются.
+        for idx, _row in sorted(targets, key=lambda pair: pair[0], reverse=True):
+            _retry(self.sheet.delete_rows, idx)
+        self._load_index()
+        return len(targets)
 
     def log_run(self, source: str, collected: int, kept: int, new: int,
                 updated: int, errors: int, note: str = "") -> None:
