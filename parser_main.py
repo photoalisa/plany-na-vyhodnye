@@ -249,6 +249,11 @@ def main(argv=None) -> int:
     if dropped:
         print(f"[+] Снято с публикации: {dropped} — событий больше нет в источниках")
 
+    # Неактивные строки не держим в рабочем листе: уносим в archive.
+    moved = store.move_inactive()
+    if moved:
+        print(f"[+] В лист archive перенесено неактивных событий: {moved}")
+
     if store.sheet is not None:
         for stat in build.stats:
             store.log_run(
