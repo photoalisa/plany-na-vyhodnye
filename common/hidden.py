@@ -109,6 +109,37 @@ class HiddenStore:
             ws.append_row(COLUMNS)
             return ws
 
+    def merge_csv(self, path: Path = CSV_PATH) -> int:
+        """Подтягивает скрытия, сделанные в офлайн-режиме.
+
+        Когда Google недоступен, парсер пишет hidden в data/hidden.csv. При
+        следующем прогоне с доступом к таблице эти записи надо перенести в
+        лист, иначе удалённые события вернутся: лист о них не знает.
+        """
+        if self.book is None or not path.exists():
+            return 0
+        added = 0
+        with path.open(encoding="utf-8-sig", newline="") as f:
+            rows = list(csv.reader(f))
+        for row in rows[1:] if rows and rows[0] and rows[0][0] == "key" else rows:
+            if not row:
+                continue
+            key = (row[0] if len(row) > 0 else "").strip()
+            url = (row[1] if len(row) > 1 else "").strip()
+            if not key and not url:
+                continue
+            if (key and key in self.keys) or (url and url in self.urls):
+                continue
+            if self.add({
+                "id": key, "source_url": url,
+                "title": (row[2] if len(row) > 2 else ""),
+                "source": (row[3] if len(row) > 3 else ""),
+            }, (row[5] if len(row) > 5 else "из офлайн-режима")):
+                added += 1
+        if added:
+            print(f"[+] Перенесено скрытий из data/hidden.csv: {added}")
+        return added
+
     # ------------------------------------------------------------------ отчёт
     def summary(self) -> str:
         return f"скрыто событий: {len(self.keys | self.urls)}"
