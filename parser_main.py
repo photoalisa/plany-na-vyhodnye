@@ -116,11 +116,16 @@ def prepare_hidden(hidden: HiddenStore, store: sheets.SheetStore) -> int:
 
 
 def remember_ids(store: sheets.SheetStore, events: list[dict]) -> None:
-    """Сохраняем id текущего состояния таблицы для следующего сравнения."""
-    if store.sheet is not None:
-        save_last_ids(set(store.existing))
-    else:
-        save_last_ids({ev["id"] for ev in events})
+    """Сохраняем id текущего состояния таблицы для следующего сравнения.
+
+    В CSV-режиме снимок НЕ перезаписываем. Иначе прогон одного источника без
+    доступа к Google подменял список всех событий своими, и следующее сравнение
+    переставало видеть ручные удаления — удалённые события возвращались.
+    """
+    if store.sheet is None:
+        print("[i] CSV-режим: снимок id не трогаю, чтобы не потерять ручные удаления")
+        return
+    save_last_ids(set(store.existing))
 
 
 def write_summary(build, today: date, path: Path = Path("out/summary.json")) -> None:
@@ -182,6 +187,10 @@ def main(argv=None) -> int:
 
     store = sheets.SheetStore(use_google=not args.csv)
     hidden = HiddenStore(book=store.book)
+    # Скрытия, сделанные без доступа к таблице, лежат в data/hidden.csv.
+    # При первом же прогоне с Google переносим их в лист hidden.
+    if store.book is not None:
+        hidden.merge_csv()
     closures = ClosureStore(book=store.book)
 
     if args.closed:
