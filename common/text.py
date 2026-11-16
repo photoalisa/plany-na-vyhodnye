@@ -192,6 +192,12 @@ _RE_DISTRICT_IN_ADDRESS = re.compile(r"([А-ЯЁ][а-яё-]+)\s+район", re.
 _RE_VILLAGE_IN_PARENS = re.compile(
     r"(?:^|[,;.(]\s*)([А-ЯЁ][А-Яа-яё\-\s]{1,40}?)\s*\(([^)]*район[^)]*)\)"
 )
+# Населённый пункт в адресе: «Новосибирская обл, г. Куйбышев, ул. …»,
+# «рп. Краснозерское». Нужен, чтобы область не считалась Новосибирском.
+_RE_PLACE_IN_ADDRESS = re.compile(
+    r"(?:^|[,;]\s*)(?:г|рп|р\.\s*п|пгт|п|с|пос|посёлок|поселок|село|деревня)\.?\s+([А-ЯЁ][А-Яа-яё\-]+)"
+)
+
 _RE_SETTLEMENT_PREFIX = re.compile(
     r"^(?:с|д|п|рп|р\.\s*п|пос|посёлок|поселок|село|деревня|станица|аул)\.?\s+",
     re.IGNORECASE,
@@ -257,7 +263,11 @@ def normalize_address(value: str) -> str:
     cleaned: list[str] = []
     for part in parts:
         low = part.lower()
-        if low in _CITY_NAMES or low.startswith("г. "):
+        if low in _CITY_NAMES:
+            continue
+        # «г. Новосибирск» из адреса убираем, а «г. Куйбышев» оставляем:
+        # иначе событие областного музея выглядит как городское.
+        if low.startswith("г. ") and low[3:].strip() in {"новосибирск"}:
             continue
         if low.endswith("район") or low.endswith("р-н"):
             continue
@@ -835,6 +845,18 @@ def guess_area(*texts: str) -> str:
     for key, area in _AREA_BY_CITY.items():
         if key in blob:
             return area
+
+    # Адрес прямо называет пункт: «Новосибирская обл, г. Куйбышев» или
+    # «рп. Краснозерское». Это надёжнее, чем «область в адресе = Новосибирск».
+    for text in texts:
+        if not text:
+            continue
+        m = _RE_PLACE_IN_ADDRESS.search(text)
+        if not m:
+            continue
+        place = m.group(1).strip(" .,")
+        if place and place.lower() not in _CITY_NAMES:
+            return place
 
     for text in texts:
         if not text:
