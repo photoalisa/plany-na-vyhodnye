@@ -68,15 +68,50 @@ def report(dups: dict[str, list[dict]], stats: dict[str, int]) -> None:
                   (row.get("date_start") or "")[:10])
 
 
+def fix_ids(rows: list[dict], known: set[str]) -> list[tuple[str, str]]:
+    """Готовит id для строк, где колонка пустая.
+
+    Базовый ключ проекта — source|url|title. У одной страницы («Творческие
+    мастер-классы в парках») под него попадают разные площадки и даты, поэтому
+    при совпадении ключ расширяется площадкой, датой и временем. Полностью
+    одинаковые строки получают одинаковый id — их потом уберёт дедупликация.
+    """
+    counters: dict[str, int] = {}
+    for row in rows:
+        triple = (row.get("source", ""), row.get("source_url", ""), row.get("title", ""))
+        base = make_id(*triple)
+        counters[base] = counters.get(base, 0) + 1
+
+    used = set(known)
+    plan: list[tuple[str, str]] = []
+    for row in rows:
+        if (row.get("id") or "").strip():
+            continue
+        base = make_id(row.get("source", ""), row.get("source_url", ""), row.get("title", ""))
+        if counters.get(base, 0) > 1 or base in used:
+            extra = "|".join([base, row.get("venue", ""), (row.get("date_start") or "")[:10],
+                              row.get("time_text", "")])
+            base = hashlib.md5(extra.encode("utf-8")).hexdigest()[:16]
+        used.add(base)
+        plan.append((row.get("_row", ""), base))
+    return plan
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Удаление дублей в листе events")
     parser.add_argument("--dry-run", action="store_true", help="только показать")
     parser.add_argument("--csv", metavar="ПУТЬ", help="разобрать выгрузку CSV вместо таблицы")
+    parser.add_argument("--fill-ids", action="store_true",
+                        help="проставить id строкам, где колонка пустая")
     args = parser.parse_args(argv)
 
     if args.csv:
         with open(args.csv, encoding="utf-8-sig", newline="") as f:
             rows = list(csv.DictReader(f))
+        known = {(r.get("id") or "").strip() for r in rows if (r.get("id") or "").strip()}
+        fixes = fix_ids(rows, known)
+        if args.fill_ids:
+            print(f"id нужно проставить: {len(fixes)} (в CSV-режиме только подсчёт)")
         dups, stats = plan(rows)
         report(dups, stats)
         return 0
@@ -86,7 +121,32 @@ def main(argv=None) -> int:
         print("[-] Google Sheets недоступен: повторите позже или укажите --csv")
         return 1
 
-    rows = [dict(zip(COLUMNS, r + [""] * (len(COLUMNS) - len(r)))) for r in store.rows[1:] if r and r[0].strip()]
+    rows = []
+    for pos, raw in enumerate(store.rows[1:], start=2):
+        if not raw or not raw[0].strip():
+            continue
+        row = dict(zip(COLUMNS, raw + [""] * (len(COLUMNS) - len(raw))))
+        row["_row"] = pos
+        rows.append(row)
+
+    known = {(r.get("id") or "").strip() for r in rows if (r.get("id") or "").strip()}
+    fixes = fix_ids(rows, known)
+    if fixes:
+        print(f"id нужно проставить: {len(fixes)}")
+        if not args.dry_run:
+            for pos, value in fixes:
+                if pos:
+                    sheets._retry(store.sheet.update, f"A{pos}", [[value]])
+            print(f"[+] проставлено id: {len(fixes)}")
+            store._load_index()
+            rows = []
+            for pos, raw in enumerate(store.rows[1:], start=2):
+                if not raw or not raw[0].strip():
+                    continue
+                row = dict(zip(COLUMNS, raw + [""] * (len(COLUMNS) - len(raw))))
+                row["_row"] = pos
+                rows.append(row)
+
     dups, stats = plan(rows)
     report(dups, stats)
     if args.dry_run or not dups:
