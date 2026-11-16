@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import sys
 import tempfile
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.manual_add import read_file, split_block  # noqa: E402
+from scripts.manual_add import (  # noqa: E402
+    is_vk_dump, read_file, split_block, vk_to_blocks,
+)
 
 TEXT = """название: Мастер-класс «Глина» в парке «Берёзовая роща»
 дата: 14 ноября
@@ -89,7 +92,67 @@ def check() -> int:
     # «экскурсионное обслуживание — бесплатно» не делает платное событие бесплатным
     assert not open_day["is_free"], open_day["price_text"]
     print("ок: анонс с афиши, 2 события, цена и возраст разобраны")
+
+    check_vk_dump()
     return 0
+
+
+VK_DUMP = """1. Источник https://vk.ru/wall-1
+Изображение https://example.com/1.jpg
+
+ТРЦ «Аура» Соседский клуб\tул. Военная, 5\t
+
+«Это тебе на Новый год. Но давай я уже покажу!» 😄
+
+Ближайшие мастер-классы:
+📅 15 ноября — 14:00–16:00
+📅 28 ноября — 15:00–17:00
+💜 Стоимость участия — 1 100 ₽.
+
+2. Источник https://vk.ru/wall-2
+Изображение https://example.com/2.jpg
+
+Крыша | Музыкальное пространство Нарымская улица, 25
+
+Музыкальный разбор полетов возвращается!
+
+14 ноября
+Сбор в 18:30 | Начало в 19:00
+Нарымская, 25 | Вход свободный
+"""
+
+
+def check_vk_dump() -> None:
+    """Выгрузка постов ВК: две площадки и два события, а не одно с временем."""
+    today = date(2026, 11, 13)
+    assert is_vk_dump(VK_DUMP), "файл с двумя постами не распознан"
+    blocks, count = vk_to_blocks(VK_DUMP, today)
+    assert count == 2, count
+    first, second = blocks.split("\n---\n")
+    assert "venue: ТРЦ «Аура» Соседский клуб" in first, first
+    assert "address: ул. Военная, 5" in first, first
+    assert "date: 15 ноября" in first, first
+    assert "time: 14:00–16:00" in first, first
+    assert "price: 1 100 ₽" in first, first
+    assert "Другие даты: 28 ноября." in first, first
+    assert "date: 14 ноября" in second, second
+    assert "time: 19:00" in second, second
+    assert "price: Бесплатно" in second, second
+    assert "address: Нарымская улица, 25" in second, second
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "dump-vk.txt"
+        path.write_text(blocks, encoding="utf-8")
+        events = read_file(path, "Вручную")
+
+    assert len(events) == 2, [ev["title"] for ev in events]
+    for ev in events:
+        # Раньше на этом месте появлялось название «17:00».
+        assert not ev["title"].replace(":", "").isdigit(), ev["title"]
+        assert ev["venue"], ev
+    assert events[0]["date_start"] == "2026-11-15", events[0]["date_start"]
+    assert events[1]["date_start"] == "2026-11-14", events[1]["date_start"]
+    print("ок: выгрузка ВК, 2 события, площадка и дата на месте")
 
 
 if __name__ == "__main__":
