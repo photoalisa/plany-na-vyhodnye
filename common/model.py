@@ -121,6 +121,10 @@ def make_event(**fields) -> dict:
         fields.get("price_source", ""), ev["price_text"], ev["text_raw"][:600]
     )
     ev["price_text"] = txt.price_label(ev["price_text"] or price_text)
+    # «Вход платный» — не цена: в карточке из такой фразы нельзя понять
+    # стоимость. Лучше пусто, чем текст, который ничего не сообщает.
+    if re.fullmatch(r"(вход\s+)?платн[а-яё]*[.!]?", (ev["price_text"] or "").strip().lower()):
+        ev["price_text"] = ""
     # Если парсер уже написал «Бесплатно» в цену, флаг обязан быть TRUE:
     # иначе фильтр «бесплатно» расходится с тем, что видно в карточке.
     if "бесплат" in (ev["price_text"] or "").lower():
@@ -131,6 +135,10 @@ def make_event(**fields) -> dict:
                               age_text=fields.get("age_text", ""))
     for key, value in flags.items():
         ev[key] = ev[key] or value
+    # Бесплатное событие не должно показывать пустую цену: в карточке
+    # оставалось пустое место, и было непонятно, платить или нет.
+    if ev["is_free"] and not (ev["price_text"] or "").strip():
+        ev["price_text"] = "Бесплатно"
 
     # Возрастная маркировка для карточки (436-ФЗ): берём старшую метку —
     # если в программе есть «18+», событие помечается как 18+.
@@ -177,7 +185,9 @@ def make_event(**fields) -> dict:
         ev["district"] = ""
 
     if not ev["category"]:
-        ev["category"] = _category_from_tags(ev["tags"], ev["title"])
+        # Ручные события приходят без тегов — им достаётся общая категория,
+        # иначе карточка не попадает ни в одну подборку.
+        ev["category"] = _category_from_tags(ev["tags"], ev["title"]) or "событие"
 
     ev["id"] = make_id(ev["source"], ev["source_url"], ev["title"])
     ev["_norm_title"] = txt.normalize_title(ev["title"])
