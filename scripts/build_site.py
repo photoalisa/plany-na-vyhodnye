@@ -839,7 +839,21 @@ def article_live_block(article, events: list[dict]) -> str:
     содержимое блока — каждую неделю.
     """
     key = article.filter
-    subset = [ev for ev in events if not key or ev["flags"].get(key)][:4]
+    matched = [ev for ev in events if not key or ev["flags"].get(key)]
+    # Один источник часто отдаёт десяток событий со ссылкой на общую страницу.
+    # В блоке такие строки выглядят как четыре ссылки в одно место, поэтому
+    # сначала берём по одному событию на ссылку.
+    subset: list[dict] = []
+    seen_urls: set[str] = set()
+    for ev in matched:
+        url = ev.get("url") or ""
+        if url and url in seen_urls:
+            continue
+        subset.append(ev)
+        if url:
+            seen_urls.add(url)
+        if len(subset) == 4:
+            break
     if not subset:
         return ""
 
