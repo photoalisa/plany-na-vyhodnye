@@ -17,6 +17,8 @@ import csv
 from datetime import datetime
 from pathlib import Path
 
+from . import text
+
 HIDDEN_TAB = "hidden"
 COLUMNS = ["key", "url", "title", "source", "added_at", "note"]
 CSV_PATH = Path("data/hidden.csv")
@@ -28,6 +30,9 @@ class HiddenStore:
         self.path = path
         self.keys: set[str] = set()
         self.urls: set[str] = set()
+        # Названия нужны, потому что id зависит от заголовка и ссылки: если
+        # источник поправил название, id меняется и скрытие перестаёт работать.
+        self.titles: set[str] = set()
         self.rows: list[list[str]] = []
         self._next_row = 1
         self._load()
@@ -54,6 +59,9 @@ class HiddenStore:
                 self.keys.add(key)
             if url:
                 self.urls.add(url)
+            title = (row[2] if len(row) > 2 else "").strip()
+            if title and not title.startswith("("):
+                self.titles.add(text.normalize_title(title))
 
     def _read_csv(self) -> list[list[str]]:
         if not self.path.exists():
@@ -63,7 +71,12 @@ class HiddenStore:
 
     # ------------------------------------------------------------------ запись
     def is_hidden(self, event: dict) -> bool:
-        return event.get("id") in self.keys or (event.get("source_url") or "") in self.urls
+        if event.get("id") in self.keys:
+            return True
+        if (event.get("source_url") or "") in self.urls:
+            return True
+        norm = text.normalize_title(event.get("title") or "")
+        return bool(norm) and norm in self.titles
 
     def add(self, event: dict, note: str = "удалено вручную") -> bool:
         key = event.get("id") or ""
@@ -77,6 +90,9 @@ class HiddenStore:
         self.rows.append(row)
         if key:
             self.keys.add(key)
+        norm = text.normalize_title(event.get("title") or "")
+        if norm:
+            self.titles.add(norm)
         if url:
             self.urls.add(url)
         self._append(row)
