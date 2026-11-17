@@ -6,6 +6,7 @@ import importlib
 import time
 import traceback
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 from datetime import date, timedelta
 
 from config import (
@@ -364,10 +365,20 @@ def dedupe(events: list[dict], sources) -> tuple[list[dict], list[tuple[dict, di
     return kept, dropped
 
 
+# CDN, который отдаёт картинки не всем: с машин GitHub HEAD-запрос
+# получает отказ, хотя ссылка рабочая. Проверять её оттуда бессмысленно,
+# иначе все афиши источника пропадают на сайте.
+TRUSTED_IMAGE_HOSTS = {"cdn.culture.ru"}
+
+
 def _verify_images(events: list[dict], workers: int = 8) -> None:
     targets = [ev for ev in events if (ev.get("image_url") or "").startswith("http")]
 
     def check(ev: dict) -> dict:
+        host = (urlparse(ev["image_url"]).hostname or "").lower()
+        if host in TRUSTED_IMAGE_HOSTS:
+            ev["image_ok"] = True
+            return ev
         ok = http.image_ok(ev["image_url"])
         ev["image_ok"] = ok
         if not ok:
