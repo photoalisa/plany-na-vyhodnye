@@ -32,7 +32,7 @@ from pathlib import Path
 
 ARTICLES_DIR = Path("content/articles")
 
-_FRONT = re.compile(r"^\s*([a-z_]+)\s*:\s*(.+?)\s*$")
+_FRONT = re.compile(r"^\s*([a-z0-9_]+)\s*:\s*(.+?)\s*$")
 _LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
 _BOLD = re.compile(r"\*\*([^*]+)\*\*")
 
