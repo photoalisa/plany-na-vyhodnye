@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from urllib.parse import urljoin
 
@@ -201,6 +202,99 @@ def _cards(url: str, today, paginate: bool = False) -> list:
     return found
 
 
+DV_BASE = "https://domdavinci.ngonb.ru"
+DV_AFISHA = f"{DV_BASE}/afisha/"
+DV_VENUE = "Дом Да Винчи"
+DV_ADDRESS = "ул. Коммунистическая, 34"
+DV_DISTRICT = "Центральный"
+
+
+def _node_text(card: bs4.element.Tag, selector: str) -> str:
+    node = card.select_one(selector)
+    return text.clean(node.get_text(" ", strip=True)) if node else ""
+
+
+def _dv_link(card: bs4.element.Tag) -> str:
+    """Ссылка на страницу события НГОНБ.
+
+    В карточке Tilda ссылка стоит на заголовке, а data-pseudo-url у картинки
+    иногда ведёт на билетный сервис или на «#». Поэтому сначала берём ссылку
+    на /afisha/events/ и только потом запасные варианты.
+    """
+    candidates: list[str] = []
+    for a in card.find_all("a", href=True):
+        candidates.append(a["href"])
+    img = card.select_one("img[data-pseudo-url]")
+    if img:
+        try:
+            data = json.loads(img.get("data-pseudo-url") or "{}")
+            candidates.append(data.get("href") or "")
+        except (ValueError, TypeError):
+            pass
+    for href in candidates:
+        href = (href or "").strip()
+        if "/afisha/events/" in href:
+            return urljoin(BASE + "/", href)
+    return ""
+
+
+def _dv_events() -> list[dict]:
+    """Афиша Дома Да Винчи: отдельный лендинг на Tilda с месячным списком.
+
+    События те же, что в разделе «События» НГОНБ, но листинг библиотеки
+    показывает только ближайшие даты. Здесь виден весь месяц, поэтому
+    выходные находятся даже тогда, когда в общем списке они уехали на
+    вторую страницу.
+    """
+    html = http.get_text(DV_AFISHA, ttl=1800)
+    if not html:
+        return []
+    soup = bs4.BeautifulSoup(html, "html.parser")
+    out: list[dict] = []
+    for card in soup.select(".landing-block-node-card"):
+        day = _node_text(card, ".landing-block-node-card-date-value")
+        month = _node_text(card, ".landing-block-node-card-date-text")
+        title = _node_text(card, ".landing-block-node-card-title")
+        if not (day and month and title):
+            continue
+        date_raw = f"{day} {month}"
+        if not dates.is_weekend_relevant(date_raw):
+            continue
+        link = _dv_link(card)
+        if not link:
+            continue
+        img = card.select_one("img[data-src], img[src]")
+        image_url = ""
+        if img:
+            src = img.get("data-src") or img.get("src") or ""
+            if src and not src.startswith("data:"):
+                image_url = urljoin(DV_BASE + "/", src)
+        # В этой вёрстке «price» — это время начала, а «price-text» — адрес.
+        time_text = _node_text(card, ".landing-block-node-card-price")
+        place = _node_text(card, ".landing-block-node-card-price-text")
+        if not re.fullmatch(r"\d{1,2}:\d{2}", time_text):
+            time_text = ""
+        blob = f"{title} {_node_text(card, '.landing-block-node-card-text')}"
+        age = re.search(r"\b(\d{1,2}\+)", blob)
+        out.append({
+            "source": "НГОНБ",
+            "title": title,
+            "date_raw": date_raw,
+            "source_url": link,
+            "image_url": image_url,
+            "time_text": time_text,
+            "venue": DV_VENUE,
+            "address": place or DV_ADDRESS,
+            "district": DV_DISTRICT,
+            "tags": "дом да винчи",
+            "age_text": age.group(1) if age else "",
+            "category": _category([], title),
+            "price_text": "",
+            "price_source": "",
+        })
+    return out
+
+
 def fetch() -> list[dict]:
     today = dates.date.today()
     cards = _cards(EVENTS, today, paginate=True) + _cards(EXHIBITIONS, today)
@@ -257,5 +351,11 @@ def fetch() -> list[dict]:
             "price_source": "бесплатно" if _is_free_tag(card) else "",
             "is_free": _is_free_tag(card),
         })
+
+    # Афиша Дома Да Винчи: отдельный лендинг, события те же, дат больше.
+    seen_urls = {ev["source_url"] for ev in events}
+    dv = [ev for ev in _dv_events() if ev["source_url"] not in seen_urls]
+    print(f"  Дом Да Винчи: {len(dv)} событий на выходные")
+    events.extend(dv)
 
     return http.parallel(_enrich, events, workers=5)
