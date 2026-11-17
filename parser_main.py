@@ -28,6 +28,7 @@ from pathlib import Path
 from common import collect, sheets
 from common.closures import ClosureStore
 from common.hidden import HiddenStore
+from common.model import COLUMNS
 from config import CHECK_IMAGES, PARALLEL_SOURCES, SOURCES
 
 LOG_FILE = "run.log"
@@ -103,10 +104,22 @@ def prepare_hidden(hidden: HiddenStore, store: sheets.SheetStore) -> int:
               f"Если удаления были настоящими: python parser_main.py --hide <id>.")
         return 0
 
+    # Название и ссылку берём из снимка прошлого прогона: без них скрытие
+    # работало только по id, а id меняется, если источник поправил заголовок.
+    store._load_base()
     marked = 0
     for rid in missing:
+        base = store.base_rows.get(rid) or []
+        def cell(name: str) -> str:
+            idx = COLUMNS.index(name)
+            return base[idx] if len(base) > idx else ""
         if hidden.add(
-            {"id": rid, "source_url": "", "title": "(удалено вручную из таблицы)", "source": ""},
+            {
+                "id": rid,
+                "source_url": cell("source_url"),
+                "title": cell("title") or "(удалено вручную из таблицы)",
+                "source": cell("source"),
+            },
             "удалено вручную из таблицы",
         ):
             marked += 1
