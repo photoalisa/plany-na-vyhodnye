@@ -123,7 +123,8 @@ def main(argv=None) -> int:
 
     rows = []
     for pos, raw in enumerate(store.rows[1:], start=2):
-        if not raw or not raw[0].strip():
+        # Пустой id — не признак пустой строки: у старых событий его нет.
+        if not raw or not any(str(cell).strip() for cell in raw):
             continue
         row = dict(zip(COLUMNS, raw + [""] * (len(COLUMNS) - len(raw))))
         row["_row"] = pos
@@ -152,21 +153,18 @@ def main(argv=None) -> int:
     if args.dry_run or not dups:
         return 0
 
-    id_col = COLUMNS.index("id")
-    index = {str(r.get("id", "")).strip(): i for i, r in enumerate(store.rows[1:], start=2) if r and r[0].strip()}
     to_delete: list[int] = []
     to_fill: list[tuple[str, str]] = []
     for key, group in dups.items():
-        # Оставляем самую раннюю строку: она уже могла быть отредактирована руками.
+        # Оставляем самую раннюю строку: её могли править руками.
         group_sorted = sorted(group, key=lambda r: (r.get("parsed_at") or ""))
         for row in group_sorted[1:]:
-            row_id = (row.get("id") or "").strip()
-            pos = index.get(row_id) if row_id else None
+            pos = row.get("_row")
             if pos:
                 to_delete.append(pos)
         first = group_sorted[0]
         if not (first.get("id") or "").strip():
-            pos = index.get("")
+            pos = first.get("_row")
             if pos:
                 to_fill.append((f"A{pos}", key))
 
