@@ -245,7 +245,16 @@ class SheetStore:
         оставляем. Пустая ячейка считается сбросом: вернётся значение парсера.
         """
         if base_row is None:
-            return new_row
+            # Снимка нет: строку писал не парсер — её внесли руками или
+            # перенесли выгрузкой. Такие не перезаписываем, только заполняем
+            # пустые ячейки: иначе следующий прогон затрёт готовую карточку.
+            merged = list(new_row)
+            for i, col in enumerate(COLUMNS):
+                if col in SERVICE_COLUMNS or i >= len(sheet_row):
+                    continue
+                if (sheet_row[i] or "").strip():
+                    merged[i] = sheet_row[i]
+            return merged
         merged = list(new_row)
         for i, col in enumerate(COLUMNS):
             if col in SERVICE_COLUMNS or i >= len(sheet_row) or i >= len(base_row):

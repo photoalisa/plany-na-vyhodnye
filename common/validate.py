@@ -13,7 +13,7 @@ ALLOWED_HOSTS = {
     "nadvizh.ru", "ngonb.ru", "m-nsk.ru", "dusoran.ru",
     "calendar.welcome-novosibirsk.ru", "parkigoroda-nsk.ru",
     "novosibirsk.myhistorypark.ru", "iskmuseum.ru", "gastro-nsk.ru",
-    "culture.ru",
+    "culture.ru", "xn--80abjcbjpll9bmq.xn--p1ai", "sshbn.ru",
 }
 
 # Ресурсы, ссылки на которые не публикуем (устав, раздел 4).
