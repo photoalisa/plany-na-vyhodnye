@@ -99,6 +99,7 @@ common/closures.py        закрытия площадок: разовые да
 common/articles.py        статьи: front-matter, разметка, текст
 parsers/*.py              22 источника
 scripts/build_site.py     генерация сайта из таблицы
+scripts/readme_card.py    карточка для README без даты (static/readme-card.png)
 scripts/hero_engraving.ps1 гравюры первого экрана корневой страницы из src/hero-refs
 yandex-root/              корневая страница домена (первый экран), в сборку не входит
 content/articles/*.md     статьи
