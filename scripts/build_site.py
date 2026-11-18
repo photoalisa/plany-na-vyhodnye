@@ -380,6 +380,15 @@ def card_html(ev: dict, weekend: bool = True) -> str:
         venue = venue[:67].rstrip(" ,.-–—") + "…"
     if venue:
         meta.append(venue)
+    # Дата и место идут двумя строками со значками: в одну строку они
+    # срастались в «21 ноября · Октябрьский · ГПНТБ СО РАН» и читались как
+    # одно длинное предложение.
+    place_line = " · ".join(meta[1:])
+    meta_html = (f'<span class="card__meta-row">{ICON_CALENDAR}'
+                 f'<span>{esc(meta[0])}</span></span>')
+    if place_line:
+        meta_html += (f'<span class="card__meta-row card__meta-row--muted">{ICON_PIN}'
+                      f'<span>{esc(place_line)}</span></span>')
     attrs = " ".join(f'data-{k}="{str(v).lower()}"' for k, v in ev["flags"].items())
     day_attr = f' data-days="{" ".join(ev.get("days") or [])}"' if ev.get("days") else ""
     # data-end — конец события по часам посетителя: по нему браузер скрывает
@@ -404,7 +413,7 @@ def card_html(ev: dict, weekend: bool = True) -> str:
     {image_html}
   </a>
   <div class="card__body">
-    <p class="card__meta">{esc(' · '.join(meta))}</p>
+    <p class="card__meta">{meta_html}</p>
     <h3 class="card__title">{esc(ev['title'])}</h3>
     <p class="card__text">{esc(cut_text(ev['text']))}</p>
     <p class="card__price">{esc(price)}</p>
@@ -556,6 +565,40 @@ def offer_link() -> str:
     if not FORM_URL:
         return ""
     return f'<a href="{esc(FORM_URL)}" target="_blank" rel="noopener nofollow">Предложить событие</a>'
+
+
+# Значки в мета-строке карточки: календарь для даты, метка для места.
+# Контурные, 16 px, цвет наследуют от строки, поэтому работают и в тёмной теме.
+ICON_CALENDAR = (
+    '<svg class="card__icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" '
+    'focusable="false"><rect x="2.2" y="3.4" width="11.6" height="10.2" rx="2" fill="none" '
+    'stroke="currentColor" stroke-width="1.3"/><path d="M2.2 6.6h11.6M5.4 2.1v2.4M10.6 2.1v2.4" '
+    'fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>'
+)
+ICON_PIN = (
+    '<svg class="card__icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" '
+    'focusable="false"><path d="M8 14.3s4.6-4.2 4.6-7.5A4.6 4.6 0 0 0 3.4 6.8c0 3.3 4.6 7.5 4.6 7.5z" '
+    'fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>'
+    '<circle cx="8" cy="6.7" r="1.65" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>'
+)
+
+
+def offer_block() -> str:
+    """Строка-приглашение прислать событие под первым экраном.
+
+    В каталоге больше двухсот карточек, поэтому блок в самом низу страницы
+    никто не увидит. Держим его компактным и сразу под описанием выпуска.
+    """
+    if not FORM_URL:
+        return ""
+    return f"""
+  <section class="offer" aria-labelledby="offer-title">
+    <div class="offer__text">
+      <h2 id="offer-title">Знаете хорошее место?</h2>
+      <p>Расскажите о событии, которого нет в каталоге: проверим и поставим.</p>
+    </div>
+    <a href="{esc(FORM_URL)}" target="_blank" rel="noopener nofollow">Предложить событие</a>
+  </section>"""
 
 
 def counter_html() -> str:
@@ -751,6 +794,7 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
   <h1>{esc(h1 or title)}</h1>
   <p class="lead">{esc(lead)}</p>
 {release_html}
+  {offer_block()}
   {controls}
 
 {sr_heading}  <div class="grid">{cards}</div>
@@ -1261,7 +1305,11 @@ select{border:1px solid var(--line);background:transparent;color:var(--ink);bord
    и соотношение 4:3 не соблюдалось. */
 .card__media img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center}
 .card__body{padding:14px 16px 18px;display:flex;flex-direction:column;gap:8px;flex:1}
-.card__meta{margin:0;font-size:13px;color:var(--accent);font-weight:600}
+.card__meta{display:flex;flex-direction:column;gap:5px;margin:0}
+.card__meta-row{display:flex;align-items:flex-start;gap:6px;font-size:13px;font-weight:600;
+  color:var(--accent);line-height:1.35}
+.card__meta-row--muted{color:var(--muted);font-weight:500}
+.card__icon{flex:0 0 auto;margin-top:1px}
 .card__title{margin:0;font-size:18px;line-height:1.28;letter-spacing:-.005em}
 .card__text{margin:0;font-size:15px;color:var(--muted);flex:1}
 .card__price{margin:0;font-size:14px;font-weight:600}
@@ -1332,9 +1380,26 @@ footer{margin-top:32px;color:var(--muted);font-size:13px}
 .article__related ul{list-style:none;padding:0;font-size:16px}
 .statyi{list-style:none;padding:0;margin:26px 0 0;max-width:70ch}
 .statyi li{padding:16px 0;border-bottom:1px solid var(--line)}
-.statyi a{font-size:19px;font-weight:600;color:var(--ink);text-decoration:none}
-.statyi a:hover{color:var(--accent)}
+.statyi a{font-size:19px;font-weight:600;color:var(--ink);text-decoration:none}.statyi a:hover{color:var(--accent)}
 .statyi p{margin:6px 0 0;font-size:15px;color:var(--muted)}
+/* Приглашение прислать событие: компактная строка под описанием выпуска.
+   В каталоге больше двухсот карточек, и блок в самом низу никто не увидит. */
+.offer{display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin:18px 0 0;
+  padding:14px 20px;border:1px solid var(--line);border-radius:12px;background:var(--media-bg)}
+.offer__text{flex:1 1 300px;min-width:0}
+.offer h2{margin:0;font-size:17px;line-height:1.25}
+.offer p{margin:3px 0 0;font-size:14px;color:var(--muted)}
+.offer a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;
+  padding:0 20px;border-radius:999px;background:var(--accent);color:var(--bg);
+  font-size:15px;font-weight:600;text-decoration:none;white-space:nowrap}
+.offer a:hover{text-decoration:underline}
+@media (max-width:560px){
+  /* На телефоне блок стоит над списком: оставляем заголовок и кнопку,
+     пояснение убираем, иначе полоса занимает четверть экрана. */
+  .offer{padding:12px 14px;gap:10px}
+  .offer p{display:none}
+  .offer a{width:100%}
+}
 """
 
 JS = """
