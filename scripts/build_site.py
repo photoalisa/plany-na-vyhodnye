@@ -37,6 +37,7 @@ if str(ROOT) not in sys.path:
 
 from common import articles as articles_store  # noqa: E402
 from common import sheets as sheets_store  # noqa: E402
+from common.address import postal_address  # noqa: E402
 from common.closures import ClosureStore  # noqa: E402
 
 # Публичный адрес сайта: он попадает в canonical, sitemap.xml и robots.txt.
@@ -549,14 +550,13 @@ def json_ld(events: list[dict], page_name: str) -> str:
             item["location"] = {
                 "@type": "Place",
                 "name": ev["venue"] or ev["address"],
-                "address": {"@type": "PostalAddress", "addressLocality": ev["area"],
-                            "streetAddress": ev["address"]},
+                "address": postal_address(ev["address"], ev["area"]),
             }
         else:
             item["location"] = {
                 "@type": "Place",
                 "name": ev["area"] or "Новосибирск",
-                "address": {"@type": "PostalAddress", "addressLocality": "Новосибирск"},
+                "address": postal_address("", ev["area"]),
             }
         org_name = ev["venue"] or ev["source"]
         if org_name:
