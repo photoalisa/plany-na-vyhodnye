@@ -744,9 +744,10 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
               '<svg class="filters-toggle__icon" viewBox="0 0 24 24" width="20" height="20" fill="none" '
               'stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">'
               '<path d="M4 7h16M7 12h10M10 17h4"/></svg>'
-              '<svg class="filters-toggle__icon filters-toggle__icon--open" viewBox="0 0 24 24" width="20" '
-              'height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" '
-              'stroke-linejoin="round" aria-hidden="true"><path d="M6 14l6-6 6 6"/></svg>'
+              '<span class="filters-toggle__label">Фильтры</span>'
+              '<svg class="filters-toggle__chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" '
+              'stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" '
+              'aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>'
               "</button>"
             + "</div>"
             '<div class="controls__row controls__row--more" id="filters-more">'
@@ -1283,13 +1284,24 @@ select{border:1px solid var(--line);background:transparent;color:var(--ink);bord
 .count{margin-left:auto;color:var(--muted);font-size:14px}
 /* Шторка фильтров. На широком экране все фильтры видны, поэтому кнопки нет;
    на телефоне она прячет лишние строки и оставляет дни, счётчик и себя. */
-.filters-toggle{display:none;align-items:center;justify-content:center;border:1px solid var(--line);
-  background:transparent;color:var(--ink);border-radius:999px;padding:0;width:44px;height:44px;
-  font-family:inherit;cursor:pointer}
-.filters-toggle__icon--open{display:none}
+.filters-toggle{display:none;align-items:center;justify-content:center;gap:6px;
+  border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
+  padding:0 14px 0 12px;width:auto;min-width:44px;height:44px;font-family:inherit;cursor:pointer}
+.filters-toggle__label{font-size:14px;font-weight:600;line-height:1}
+/* Стрелка вниз подсказывает, что кнопка раскрывает строку фильтров.
+   В открытом состоянии поворачивается вверх. */
+.filters-toggle__chevron{flex:0 0 auto;transition:transform .18s ease}
 .filters-toggle[aria-expanded="true"]{border-color:var(--accent);color:var(--accent)}
-.filters-toggle[aria-expanded="true"] .filters-toggle__icon{display:none}
-.filters-toggle[aria-expanded="true"] .filters-toggle__icon--open{display:block}
+.filters-toggle[aria-expanded="true"] .filters-toggle__chevron{transform:rotate(180deg)}
+@media (prefers-reduced-motion: reduce){
+  .filters-toggle__chevron{transition:none}
+}
+/* На самых узких экранах подпись отдаём: с ней кнопка уезжает на отдельную
+   строку, а иконка со стрелкой всё равно читается как «раскрыть». */
+@media (max-width:345px){
+  .filters-toggle{padding:0 9px;gap:1px}
+  .filters-toggle__label{display:none}
+}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:22px;margin-top:26px}
 @keyframes gridFlash{from{opacity:.3}to{opacity:1}}
 .grid--flash{animation:gridFlash .3s ease-out}
