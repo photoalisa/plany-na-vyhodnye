@@ -35,7 +35,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from common import review as review_store  # noqa: E402
 from common import sheets  # noqa: E402
+from common import validate  # noqa: E402
 from common.model import COLUMNS  # noqa: E402
 
 SERVICE = set(sheets.SERVICE_COLUMNS)
@@ -121,6 +123,8 @@ def main(argv=None) -> int:
     parser.add_argument("--archive-missing", action="store_true",
                         help="строки таблицы, которых нет в файле, пометить archived")
     parser.add_argument("--date", metavar="YYYY-MM-DD", help="считать эту дату сегодняшней")
+    parser.add_argument("--apply-review", action="store_true",
+                        help="сложить домены вне белого списка в очередь проверки")
     args = parser.parse_args(argv)
 
     source = Path(args.path)
@@ -146,8 +150,16 @@ def main(argv=None) -> int:
     status_col = COLUMNS.index("status")
     kind_col = COLUMNS.index("kind")
 
+    review_queue: list[tuple[str, str, str, str]] = []
+
     for row in incoming:
         row = list(row)
+        # Ссылка не из белого списка: строку сохраняем, но не публикуем.
+        url = row[COLUMNS.index("source_url")]
+        status, reason, host = validate.classify(url)
+        if status in ("banned", "review", "invalid"):
+            row[status_col] = "review"
+            review_queue.append((host, reason, url, row[COLUMNS.index("title")]))
         end = row[end_col]
         finished = bool(end) and end < today.isoformat() and row[kind_col] != "permanent"
         if finished:
@@ -170,6 +182,12 @@ def main(argv=None) -> int:
     print(f"[i] Новых строк: {len(appends)}")
     print(f"[i] Прошедших событий: {len(past)} — уйдут в архив")
     print(f"[i] Строк в таблице нет в файле: {missing} (их не трогаем)")
+    if review_queue:
+        hosts = sorted({item[0] for item in review_queue})
+        print(f"[!] Со ссылками вне белого списка: {len(review_queue)} строк, "
+              f"доменов {len(hosts)} — статус review, на сайт не попадут")
+        for host, reason, url, title in review_queue[:5]:
+            print(f"    {host or '—':28} {reason:14} {title[:44]}")
 
     if args.archive_missing and missing:
         print(f"[i] --archive-missing: {missing} строк будут помечены archived")
@@ -209,6 +227,13 @@ def main(argv=None) -> int:
         chunk = archived[start:start + sheets.UPDATE_BATCH]
         body = [{"range": rng, "values": values} for rng, values in chunk]
         sheets._retry(store.sheet.batch_update, body, value_input_option="USER_ENTERED")
+
+    if review_queue and args.apply_review:
+        store_review = review_store.ReviewStore(book=store.book)
+        for host, reason, url, title in review_queue:
+            store_review.add(host, reason, url, title, "")
+        store_review.save()
+        print(f"[i] Очередь проверки: {store_review.summary()}")
 
     print(f"[+] Записано: новых {len(appends)}, обновлено {len(updates)}, "
           f"помечено archived {len(archived)}")

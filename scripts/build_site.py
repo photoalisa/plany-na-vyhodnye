@@ -97,8 +97,28 @@ FILTERS = [
 
 # --------------------------------------------------------------------- данные
 def events_from_rows(rows: list[dict]) -> list[dict]:
-    """Сырые строки таблицы → события, готовые к выводу."""
-    return [norm_event(r) for r in rows if (r.get("status") or "active") == "active"]
+    """Сырые строки таблицы → события, готовые к выводу.
+
+    Публикуем только активные строки с разрешённой ссылкой: если домен попал
+    в запрещённые или ждёт проверки, карточка на сайт не идёт, даже когда
+    статус в таблице остался `active`.
+    """
+    from common import validate
+
+    ready, blocked = [], []
+    for row in rows:
+        if (row.get("status") or "active") != "active":
+            continue
+        status, _reason, host = validate.classify((row.get("source_url") or "").strip())
+        if status != "allowed":
+            blocked.append(f"{host or '—'} ({status})")
+            continue
+        ready.append(norm_event(row))
+    if blocked:
+        unique = sorted(set(blocked))
+        print(f"[i] Не публикую строк с непроверенной ссылкой: {len(blocked)} "
+              f"({', '.join(unique[:4])}{'…' if len(unique) > 4 else ''})")
+    return ready
 
 
 def load_events(path: Path) -> list[dict]:

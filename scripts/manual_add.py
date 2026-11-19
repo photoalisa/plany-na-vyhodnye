@@ -52,7 +52,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from common import dates as dts  # noqa: E402
-from common import http, model, sheets  # noqa: E402
+from common import http, model, sheets, validate  # noqa: E402
+from common import review as review_store  # noqa: E402
 
 MANUAL_DIR = ROOT / "content" / "manual"
 
@@ -618,7 +619,32 @@ def main(argv=None) -> int:
     for ev in problems:
         print(f"[!] Не разобрал дату: «{ev['title']}» ({ev['date_raw']!r}) — "
               f"в таблицу не пишу, пока дата не исправлена")
-    ready = [ev for ev in events if ev not in problems]
+
+    # Ссылка проверяется по тем же правилам, что у парсеров: домен из белого
+    # списка или из подтверждённых вручную. Иначе событие не публикуем, а хост
+    # уходит в очередь проверки.
+    rejected: list[dict] = []
+    ready: list[dict] = []
+    for ev in events:
+        if ev in problems:
+            continue
+        errors = validate.validate(ev)
+        if errors:
+            print(f"[!] {ev['title'][:60]} — {', '.join(errors)}")
+            if any(err.startswith("source_url-review:") for err in errors):
+                rejected.append(ev)
+            continue
+        ready.append(ev)
+
+    if rejected:
+        store_review = review_store.ReviewStore(book=None)
+        for ev in rejected:
+            _status, reason, host = validate.classify(ev.get("source_url", ""))
+            store_review.add(host, reason, ev.get("source_url", ""),
+                             ev.get("title", ""), "Вручную")
+        store_review.save()
+        print(f"[i] В очередь проверки доменов: {store_review.summary()} — "
+              f"подтвердить: python scripts/review_links.py --approve <домен>")
 
     print()
     for ev in ready:
