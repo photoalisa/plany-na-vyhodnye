@@ -19,6 +19,10 @@ from config import (
 
 from . import dates, http, kassy, model, text, validate
 
+# Домены со статусом review, встреченные в прогоне: parser_main после сбора
+# складывает их в лист review, чтобы незнакомое не терялось молча.
+REVIEW_QUEUE: list[dict] = []
+
 
 @dataclass
 class SourceStat:
@@ -116,6 +120,14 @@ def _run_source(src, today: date, hidden: set[str] | None = None) -> tuple[Sourc
         if errors:
             for err in errors:
                 stat.add_error(err)
+                if err.startswith("source_url-review:"):
+                    REVIEW_QUEUE.append({
+                        "host": err.split(":", 1)[1],
+                        "reason": event.get("_review_reason", "unknown"),
+                        "url": event.get("source_url", ""),
+                        "title": event.get("title", ""),
+                        "source": event.get("source", ""),
+                    })
             continue
         stat.valid += 1
         collected.append(event)
