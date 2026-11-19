@@ -653,6 +653,11 @@ def main(argv=None) -> int:
         print(f"    id {ev['id']} · {ev['geo_area']} · {ev['category']}")
 
     if not ready:
+        if rejected:
+            print(f"\n[i] Все события ждут подтверждения доменов: {len(rejected)}. "
+                  f"Это не ошибка — домены в очереди, "
+                  f"проверить: python scripts/review_links.py --list")
+            return 0
         print("\n[-] Писать нечего")
         return 1
 
