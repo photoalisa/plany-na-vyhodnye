@@ -26,6 +26,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from common import collect, sheets
+from common import review as review_store
 from common.closures import ClosureStore
 from common.hidden import HiddenStore
 from common.model import COLUMNS
@@ -139,6 +140,24 @@ def remember_ids(store: sheets.SheetStore, events: list[dict]) -> None:
         print("[i] CSV-режим: снимок id не трогаю, чтобы не потерять ручные удаления")
         return
     save_last_ids(set(store.existing))
+
+
+def save_review(book, queue: list[dict]) -> None:
+    """Сложить незнакомые домены прогона в лист review.
+
+    Парсер их не публикует, но и не теряет: домен появляется в очереди,
+    человек подтверждает его одной командой (scripts/review_links.py).
+    """
+    if not queue:
+        return
+    store = review_store.ReviewStore(book=book)
+    for item in queue:
+        store.add(item.get("host", ""), item.get("reason", "unknown"),
+                  item.get("url", ""), item.get("title", ""), item.get("source", ""))
+    store.save()
+    hosts = len({item.get("host", "") for item in queue})
+    print(f"[i] В очередь проверки ссылок: {store.summary()} "
+          f"(в этом прогоне доменов {hosts})")
 
 
 def write_summary(build, today: date, path: Path = Path("out/summary.json")) -> None:
@@ -260,6 +279,7 @@ def main(argv=None) -> int:
     print(collect.summary(build))
     print()
     write_summary(build, today)
+    save_review(store.book, collect.REVIEW_QUEUE)
 
     stats = store.upsert(events, today=today)
 
