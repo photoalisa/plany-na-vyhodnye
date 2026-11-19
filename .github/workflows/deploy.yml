@@ -15,7 +15,7 @@ on:
       - "scripts/**"
       - "common/**"
       - "static/**"
-      - "articles/**"
+      - "content/articles/**"
       - ".github/workflows/**"
   schedule:
     - cron: "0 2 * * 1"   # понедельник 09:00 НСК
@@ -57,6 +57,9 @@ jobs:
             exit 1
           fi
           printf '%s' "$GOOGLE_CREDENTIALS" > credentials.json
+
+      - name: Проверка контракта
+        run: python scripts/check_contract.py --sheet
 
       - name: Сборка из таблицы
         run: |
