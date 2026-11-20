@@ -420,6 +420,16 @@ class SheetStore:
         _retry(ws.append_row, COLUMNS, value_input_option="USER_ENTERED")
         return ws
 
+    def _archived_ids(self) -> set[str]:
+        """`id`, которые уже есть в листе archive."""
+        if self.book is None:
+            return set()
+        titles = {ws.title for ws in self.book.worksheets()}
+        if ARCHIVE_TAB not in titles:
+            return set()
+        values = _retry(self.book.worksheet(ARCHIVE_TAB).get_all_values)
+        return {(row[0] or "").strip() for row in values[1:] if row}
+
     def move_inactive(self, dry_run: bool = False) -> int:
         """Переносит неактивные строки из events в лист archive.
 
@@ -440,19 +450,28 @@ class SheetStore:
                 targets.append((idx, row))
         if not targets:
             return 0
+
+        # Событие могло вернуться в events из файла ручных событий и снова
+        # уйти в архив: копию второй раз не пишем, но из events убираем.
+        archived_ids = self._archived_ids()
+        to_copy = [(idx, row) for idx, row in targets if row[0].strip() not in archived_ids]
+        already = len(targets) - len(to_copy)
+
         if dry_run:
-            print(f"[dry-run] в лист {ARCHIVE_TAB} уйдёт строк: {len(targets)}")
+            print(f"[dry-run] в лист {ARCHIVE_TAB} уйдёт строк: {len(to_copy)}, "
+                  f"уже в архиве и будут только удалены: {already}")
             return len(targets)
 
         width = len(COLUMNS)
         payload = [
             [_fmt(cell) for cell in (row + [""] * width)[:width]]
-            for _, row in targets
+            for _, row in to_copy
         ]
-        ws = self._archive_worksheet()
-        for start in range(0, len(payload), BATCH):
-            _retry(ws.append_rows, payload[start:start + BATCH],
-                   value_input_option="USER_ENTERED")
+        if payload:
+            ws = self._archive_worksheet()
+            for start in range(0, len(payload), BATCH):
+                _retry(ws.append_rows, payload[start:start + BATCH],
+                       value_input_option="USER_ENTERED")
         # Снизу вверх: после удаления строки номера ниже сдвигаются.
         for idx, _row in sorted(targets, key=lambda pair: pair[0], reverse=True):
             _retry(self.sheet.delete_rows, idx)

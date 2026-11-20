@@ -380,7 +380,7 @@ def dedupe(events: list[dict], sources) -> tuple[list[dict], list[tuple[dict, di
 # CDN, который отдаёт картинки не всем: с машин GitHub HEAD-запрос
 # получает отказ, хотя ссылка рабочая. Проверять её оттуда бессмысленно,
 # иначе все афиши источника пропадают на сайте.
-TRUSTED_IMAGE_HOSTS = {"cdn.culture.ru"}
+TRUSTED_IMAGE_HOSTS = {"cdn.culture.ru", "userapi.com"}
 
 
 def _verify_images(events: list[dict], workers: int = 8) -> None:
@@ -388,7 +388,8 @@ def _verify_images(events: list[dict], workers: int = 8) -> None:
 
     def check(ev: dict) -> dict:
         host = (urlparse(ev["image_url"]).hostname or "").lower()
-        if host in TRUSTED_IMAGE_HOSTS:
+        if host in TRUSTED_IMAGE_HOSTS or any(
+                host.endswith("." + trusted) for trusted in TRUSTED_IMAGE_HOSTS):
             ev["image_ok"] = True
             return ev
         ok = http.image_ok(ev["image_url"])
