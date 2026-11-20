@@ -674,6 +674,12 @@ def main(argv=None) -> int:
     stats = store.upsert(ready, today=today)
     print(f"\n[+] Новых: {stats['new']}, обновлено: {stats['updated']}, "
           f"в архив: {stats['archived']}")
+    # Прошедшие ручные события помечаются archived в upsert, но перенос в лист
+    # archive делает parser_main. Здесь он идёт позже ручного разбора, поэтому
+    # без этого вызова копии висят в events до следующего прогона.
+    moved = store.move_inactive()
+    if moved:
+        print(f"[+] В лист archive перенесено неактивных событий: {moved}")
     print("[i] Сайт обновится при следующей публикации: понедельник или пятница "
           "в 09:00 либо кнопкой Run workflow")
     return 0
