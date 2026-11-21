@@ -470,10 +470,9 @@ def chips_html(active: str = "", events: list[dict] | None = None,
 
 
 def day_chips_html() -> str:
-    # «Все выходные» — явный сброс дня: без него непонятно, что можно смотреть
-    # субботу и воскресенье сразу, а на телефоне это ещё и единственная подсказка.
+    # Кнопки — переключатели: повторное нажатие снимает день. Отдельного чипа
+    # «все выходные» нет: он обещал больше, чем показывал (прошедшее скрыто).
     return (
-        '<button class="chip" data-day="" aria-pressed="true">Все выходные</button>'
         '<button class="chip" data-day="sat" aria-pressed="false">Суббота</button>'
         '<button class="chip" data-day="sun" aria-pressed="false">Воскресенье</button>'
     )
@@ -1566,8 +1565,8 @@ function isSundayInNovosibirsk(){
 if (isSundayInNovosibirsk()){
   const satChip = dayChips.find(chip => chip.dataset.day === 'sat');
   if (satChip) satChip.hidden = true;
-  // День не переключаем: «Все выходные» остаётся выбранным, а субботние
-  // события, которые уже закончились, отсекает проверка прошедших.
+  // В воскресенье субботние события уже прошли: показываем воскресенье.
+  if (!day) day = 'sun';
   if (controlsEl) controlsEl.dataset.sunday = 'true';
 }
 function syncDayChips(){
@@ -1802,9 +1801,8 @@ if (article) {
 
 document.querySelectorAll('[data-reset]').forEach(btn => btn.addEventListener('click', () => {
   active.clear();
-  // Сброс возвращает к «Все выходные»: день выбирается явно, а прошедшее
-  // отсекает проверка времени.
-  day = '';
+  // В воскресенье «оба дня» уже не имеет смысла: суббота прошла.
+  day = controlsEl && controlsEl.dataset.sunday === 'true' ? 'sun' : '';
   showPast = false;
   chips.forEach(chip => chip.removeAttribute('aria-current'));
   syncDayChips();
