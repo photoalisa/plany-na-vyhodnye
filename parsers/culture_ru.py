@@ -23,6 +23,7 @@ import json
 import re
 import time
 
+from common import address as addr
 from common import dates as dts
 
 BASE = "https://www.culture.ru"
@@ -120,6 +121,25 @@ def _seance_time(seance: dict) -> str:
     return text
 
 
+def _clean_address(raw: str) -> str:
+    """«Новосибирская обл, г Новосибирск, ул. Обская, д. 4» → «ул. Обская, 4».
+
+    В таблицу адрес должен попадать в том же виде, что и у остальных источников:
+    иначе район по нему не определяется, а в карточке видно «Новосибирская обл».
+    """
+    if not raw:
+        return ""
+    match = re.search(r"\bг\.?\s*([А-ЯЁ][а-яё-]+)", raw)
+    locality = match.group(1) if match else "Новосибирск"
+    # «г Новосибирск» отдельной частью: normalize() убирает город, только когда
+    # он совпадает с locality, а формат без точки не распознаёт. У области город
+    # наоборот нужен: по нему определяется населённый пункт.
+    cleaned = raw
+    if locality.lower().startswith("новосиб"):
+        cleaned = re.sub(r"(?:^|[,;]\s*)г\.?\s*[А-ЯЁ][а-яё-]+", "", raw)
+    return addr.normalize(cleaned, locality=locality)
+
+
 def _price_text(price: dict | None) -> str:
     if not price:
         return ""
@@ -182,7 +202,7 @@ def _detail(page, item: dict, sat: str, sun: str) -> dict | None:
 
     return {
         "place": place.get("title") or item.get("topPlaceTitle") or "",
-        "address": place.get("address") or "",
+        "address": _clean_address(place.get("address") or ""),
         "text": text,
         "time_text": time_text,
         "start": start,
