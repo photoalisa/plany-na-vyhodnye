@@ -409,6 +409,11 @@ class SheetStore:
                 continue
 
             old = self.rows[idx - 1] if 0 <= idx - 1 < len(self.rows) else []
+            if ev.get("_image_unchecked"):
+                # Прогон с --no-images: подтверждённую афишу не сбрасываем в FALSE.
+                ok_col = COLUMNS.index("image_ok")
+                if len(old) > ok_col and (old[ok_col] or "").strip().upper() == "TRUE":
+                    row[ok_col] = old[ok_col]
             merged = self._merge_row(row, old, base)
             if _changed(old, merged):
                 updates.append((f"A{idx}:{last_col}{idx}", [merged]))

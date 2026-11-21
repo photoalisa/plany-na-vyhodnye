@@ -59,6 +59,9 @@ def normalize(raw: str, locality: str = "") -> str:
     for part in parts:
         part = _HOUSE_RE.sub(" ", part)
         part = _BLOCK_RE.sub(" корп. ", part)
+        # «Красный пр-кт» и «пр-т» — тот же проспект, но по словарю улиц
+        # сокращение не находилось, и район оставался пустым.
+        part = re.sub(r"\bпр-?к?т\.?", "проспект", part, flags=re.IGNORECASE)
         part = re.sub(r"\s+", " ", part).strip(" ,")
         if part and (not cleaned or cleaned[-1] != part):
             cleaned.append(part)
