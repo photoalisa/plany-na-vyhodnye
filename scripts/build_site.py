@@ -259,9 +259,9 @@ def event_bounds(ev: dict, sat: date, sun: date) -> tuple[str, str]:
 
     sh, sm = int(times[0][0]), int(times[0][1])
     eh, em = int(times[-1][0]), int(times[-1][1])
-    # одно время начала — считаем, что событие идёт два часа: спектакль или
-    # лекция короче не бывают, а при ошибке карточка просто провисит лишний час.
-    minutes = eh * 60 + em + (120 if len(times) == 1 else 0)
+    # Одно время начала без окончания: час — типичная длина лекции или встречи.
+    # Два часа держали карточку в выдаче слишком долго после начала события.
+    minutes = eh * 60 + em + (60 if len(times) == 1 else 0)
     end_day = last
     if minutes >= 24 * 60:
         end_day, minutes = last + timedelta(days=1), minutes % (24 * 60)
@@ -470,7 +470,10 @@ def chips_html(active: str = "", events: list[dict] | None = None,
 
 
 def day_chips_html() -> str:
+    # «Все выходные» — явный сброс дня: без него непонятно, что можно смотреть
+    # субботу и воскресенье сразу, а на телефоне это ещё и единственная подсказка.
     return (
+        '<button class="chip" data-day="" aria-pressed="true">Все выходные</button>'
         '<button class="chip" data-day="sat" aria-pressed="false">Суббота</button>'
         '<button class="chip" data-day="sun" aria-pressed="false">Воскресенье</button>'
     )
@@ -482,14 +485,30 @@ def area_names(events: list[dict]) -> list[str]:
                    if e["area"] and e["area"] != "Новосибирск"})
 
 
+def _picker_html(name: str, label: str, options: list[tuple[str, str]], aria: str) -> str:
+    """Раскрывающийся список с чекбоксами: мест может быть несколько."""
+    items = "".join(
+        f'<label class="picker__item"><input type="checkbox" value="{esc(v)}">'
+        f"<span>{esc(t)}</span></label>"
+        for v, t in options
+    )
+    return (
+        f'<details class="picker" data-picker="{name}">'
+        f'<summary class="chip picker__btn" aria-label="{esc(aria)}">'
+        f'<span data-picker-label>{esc(label)}</span></summary>'
+        f'<div class="picker__menu">{items}'
+        '<button type="button" class="chip picker__reset" data-picker-reset>Сбросить</button>'
+        "</div></details>"
+    )
+
+
 def district_select_html(events: list[dict]) -> str:
-    """Районы города — отдельный список: в общем они путались с областью."""
+    """Районы города. «Весь Новосибирск» отсекает область, не сужая до района."""
     districts = sorted({e["district"] for e in events if e["district"]})
     if not districts:
         return ""
-    options = "".join(f'<option value="{esc(d)}">{esc(d)}</option>' for d in districts)
-    return ('<select id="district" aria-label="Районы Новосибирска">'
-            '<option value="">Районы Новосибирска</option>' + options + "</select>")
+    options = [("city", "Весь Новосибирск")] + [(d, d) for d in districts]
+    return _picker_html("district", "Все районы", options, "Районы Новосибирска")
 
 
 def area_select_html(events: list[dict], default_label: str = "За городом") -> str:
@@ -497,9 +516,8 @@ def area_select_html(events: list[dict], default_label: str = "За городо
     areas = area_names(events)
     if len(areas) < 2:
         return ""
-    options = "".join(f'<option value="{esc(n)}">{esc(n)}</option>' for n in areas)
-    return ('<select id="geo" aria-label="За городом: населённый пункт области">'
-            f'<option value="">{esc(default_label)}</option>' + options + "</select>")
+    return _picker_html("area", default_label, [(n, n) for n in areas],
+                        "Населённые пункты области")
 
 
 def json_ld(events: list[dict], page_name: str) -> str:
@@ -1301,6 +1319,30 @@ a.chip{display:inline-flex;align-items:center;text-decoration:none}
 .chip.chip--top{display:none}
 select{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
   padding:7px 12px;font-size:14px;font-family:inherit}
+/* Место может быть не одно: районы и населённые пункты выбираются чекбоксами. */
+.picker{position:relative}
+.picker__btn{display:inline-flex;align-items:center;gap:6px}
+.picker__btn::-webkit-details-marker{display:none}
+.picker__btn::after{content:"";width:6px;height:6px;margin-left:2px;
+  border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;
+  transform:rotate(45deg) translateY(-1px);opacity:.6}
+.picker[open] .picker__btn::after{transform:rotate(-135deg) translateY(-1px)}
+.picker.is-set .picker__btn{border-color:var(--accent);color:var(--accent)}
+.picker__menu{position:absolute;top:calc(100% + 6px);left:0;z-index:20;min-width:240px;
+  max-width:min(320px,calc(100vw - 32px));max-height:min(60vh,360px);overflow:auto;
+  background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:6px;
+  box-shadow:0 12px 28px rgba(23,23,21,.14)}
+.picker__item{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:8px;
+  font-size:14px;cursor:pointer}
+.picker__item:hover{background:rgba(23,23,21,.05)}
+.picker__item input{width:16px;height:16px;accent-color:var(--accent);flex:0 0 auto}
+.picker__reset{margin:4px;font-size:13px}
+/* На телефоне список раскрывается внутри шторки: абсолютное меню вылезало за экран. */
+@media (max-width:640px){
+  .picker[open]{flex:1 0 100%}
+  .picker__menu{position:static;margin-top:8px;width:100%;max-width:none;
+    box-shadow:none;max-height:50vh}
+}
 .count{margin-left:auto;color:var(--muted);font-size:14px}
 /* Шторка фильтров. На широком экране все фильтры видны, поэтому кнопки нет;
    на телефоне она прячет лишние строки и оставляет дни, счётчик и себя. */
@@ -1440,16 +1482,40 @@ const cards = [...document.querySelectorAll('.card')];
 const gridEl = document.querySelector('.grid');
 const chips = [...document.querySelectorAll('.chip[data-filter]')];
 const dayChips = [...document.querySelectorAll('.chip[data-day]')];
-// Два списка мест: районы города (#district) и населённые пункты области
-// (#geo, он же фильтр «За городом»). Значения опций — просто названия;
-// префиксы «d:» и «g:» остались в старых ссылках, их снимаем.
-const districtSel = document.querySelector('#district');
-const areaSel = document.querySelector('#geo');
+// Два списка мест: районы города и населённые пункты области (он же «За городом»).
+// В каждом можно отметить несколько значений; пустой список значит «не фильтровать».
+// Префиксы «d:» и «g:» остались в старых ссылках, их снимаем.
+const districtPicker = document.querySelector('[data-picker="district"]');
+const areaPicker = document.querySelector('[data-picker="area"]');
 function plain(value){
   const raw = value || '';
   const cut = raw.indexOf(':');
   return cut > 0 ? raw.slice(cut + 1) : raw;
 }
+function pickerValues(picker){
+  if (!picker) return [];
+  return [...picker.querySelectorAll('input[type="checkbox"]')]
+    .filter(input => input.checked)
+    .map(input => input.value);
+}
+// Подпись кнопки: пусто — название по умолчанию, одно значение — его имя,
+// несколько — счётчик, иначе на телефоне не видно, что фильтр включён.
+function updatePickerLabel(picker){
+  if (!picker) return;
+  const label = picker.querySelector('[data-picker-label]');
+  const values = pickerValues(picker);
+  if (label){
+    label.textContent = values.length === 0 ? label.dataset.default
+      : values.length === 1 ? (values[0] === 'city' ? 'Весь Новосибирск' : values[0])
+      : 'Выбрано: ' + values.length;
+  }
+  picker.classList.toggle('is-set', values.length > 0);
+}
+[...document.querySelectorAll('.picker')].forEach(picker => {
+  const label = picker.querySelector('[data-picker-label]');
+  if (label) label.dataset.default = label.textContent;
+  updatePickerLabel(picker);
+});
 const pastNote = document.querySelector('[data-past]');
 const pastToggle = document.querySelector('[data-past-toggle]');
 const counter = document.querySelector('[data-count]');
@@ -1500,7 +1566,8 @@ function isSundayInNovosibirsk(){
 if (isSundayInNovosibirsk()){
   const satChip = dayChips.find(chip => chip.dataset.day === 'sat');
   if (satChip) satChip.hidden = true;
-  if (!day) day = 'sun';
+  // День не переключаем: «Все выходные» остаётся выбранным, а субботние
+  // события, которые уже закончились, отсекает проверка прошедших.
   if (controlsEl) controlsEl.dataset.sunday = 'true';
 }
 function syncDayChips(){
@@ -1508,16 +1575,19 @@ function syncDayChips(){
 }
 syncDayChips();
 
-function restorePlace(sel, param, prefix){
-  if (!sel) return;
-  const wanted = plain(params.get(param) || '');
-  if (!wanted) return;
-  const values = [...sel.options].map(o => o.value);
-  const match = [wanted, prefix + ':' + wanted].find(v => values.includes(v));
-  if (match) sel.value = match;
+// Состояние из адреса: список через запятую, старые одиночные значения тоже читаются.
+function restorePicker(picker, param){
+  if (!picker) return;
+  const raw = params.get(param) || '';
+  if (!raw) return;
+  const wanted = raw.split(',').map(v => plain(v.trim())).filter(Boolean);
+  picker.querySelectorAll('input[type="checkbox"]').forEach(input => {
+    if (wanted.includes(input.value)) input.checked = true;
+  });
+  updatePickerLabel(picker);
 }
-restorePlace(districtSel, 'district', 'd');
-restorePlace(areaSel, 'geo', 'g');
+restorePicker(districtPicker, 'district');
+restorePicker(areaPicker, 'geo');
 
 function plural(n){
   const m = n % 100, d = n % 10;
@@ -1532,10 +1602,10 @@ function syncUrl(){
     if (active.has(k)) params.set(k, '1'); else params.delete(k);
   });
   if (day) params.set('day', day); else params.delete('day');
-  const district = districtSel ? plain(districtSel.value) : '';
-  if (district) params.set('district', district); else params.delete('district');
-  const area = areaSel ? plain(areaSel.value) : '';
-  if (area) params.set('geo', area); else params.delete('geo');
+  const districts = pickerValues(districtPicker);
+  if (districts.length) params.set('district', districts.join(',')); else params.delete('district');
+  const areas = pickerValues(areaPicker);
+  if (areas.length) params.set('geo', areas.join(',')); else params.delete('geo');
   const q = params.toString();
   const next = q ? '?' + q : location.pathname;
   // apply() вызывается ещё и по таймеру: без сравнения адрес переписывался бы
@@ -1549,13 +1619,9 @@ function syncUrl(){
 // выдача короче полной.
 function syncFilters(){
   if (!controlsEl) return;
-  const place = Boolean(
-    (districtSel && plain(districtSel.value)) || (areaSel && plain(areaSel.value))
-  );
+  const place = pickerValues(districtPicker).length > 0 || pickerValues(areaPicker).length > 0;
   controlsEl.dataset.active = String(active.size > 0 || place);
-  [districtSel, areaSel].forEach(sel => {
-    if (sel) sel.classList.toggle('is-set', Boolean(plain(sel.value)));
-  });
+  [districtPicker, areaPicker].forEach(updatePickerLabel);
 }
 
 // Прошедшее событие определяем по часам посетителя: сервер собрал страницу
@@ -1575,14 +1641,20 @@ function updatePast(past){
 }
 
 function apply(animate){
-  const district = districtSel ? plain(districtSel.value) : '';
-  const area = areaSel ? plain(areaSel.value) : '';
+  const districts = pickerValues(districtPicker);
+  const areas = pickerValues(areaPicker);
+  const cityWide = districts.includes('city');
+  const districtNames = districts.filter(v => v !== 'city');
   let shown = 0, past = 0;
   const visibleCards = [];
   for (const card of cards){
     const okFlags = [...active].every(k => card.dataset[k] === 'true');
-    const okZone = (!district || (card.dataset.district || '') === district)
-                && (!area || (card.dataset.geo || '') === area);
+    const inCity = (card.dataset.geo || 'Новосибирск') === 'Новосибирск';
+    const okDistrict = !districts.length
+      || (cityWide && inCity)
+      || districtNames.includes(card.dataset.district || '');
+    const okArea = !areas.length || areas.includes(card.dataset.geo || '');
+    const okZone = okDistrict && okArea;
     const okDay = !day || (card.dataset.days || '').split(' ').includes(day);
     const matches = okFlags && okZone && okDay;
     const gone = matches && isPast(card);
@@ -1648,12 +1720,41 @@ dayChips.forEach(chip => chip.addEventListener('click', () => {
   track('day', day || 'both');
 }));
 
-[[districtSel, 'district'], [areaSel, 'place']].forEach(([sel, key]) => {
-  if (!sel) return;
-  sel.addEventListener('change', () => {
-    apply(true);
-    track(key, plain(sel.value) || 'all');
+// Выбор места: чекбоксы в раскрывающемся списке. Район города и населённый
+// пункт области вместе дают пустую выдачу, поэтому один список сбрасывает другой.
+function clearPicker(picker){
+  if (!picker) return;
+  picker.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = false; });
+  updatePickerLabel(picker);
+}
+[[districtPicker, areaPicker, 'district'], [areaPicker, districtPicker, 'place']]
+  .forEach(([picker, other, key]) => {
+    if (!picker) return;
+    picker.addEventListener('change', (e) => {
+      if (!e.target.matches('input[type="checkbox"]')) return;
+      if (pickerValues(picker).length) clearPicker(other);
+      updatePickerLabel(picker);
+      apply(true);
+      track(key, pickerValues(picker).join(',') || 'all');
+    });
   });
+
+document.querySelectorAll('[data-picker-reset]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    clearPicker(btn.closest('.picker'));
+    apply(true);
+  });
+});
+
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('details.picker[open]').forEach(picker => {
+    if (!picker.contains(e.target)) picker.open = false;
+  });
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('details.picker[open]').forEach(picker => { picker.open = false; });
+  }
 });
 
 if (controlsEl && toggleBtn){
@@ -1701,12 +1802,13 @@ if (article) {
 
 document.querySelectorAll('[data-reset]').forEach(btn => btn.addEventListener('click', () => {
   active.clear();
-  // В воскресенье «оба дня» уже не имеет смысла: суббота прошла.
-  day = controlsEl && controlsEl.dataset.sunday === 'true' ? 'sun' : '';
+  // Сброс возвращает к «Все выходные»: день выбирается явно, а прошедшее
+  // отсекает проверка времени.
+  day = '';
   showPast = false;
   chips.forEach(chip => chip.removeAttribute('aria-current'));
   syncDayChips();
-  [districtSel, areaSel].forEach(sel => { if (sel) sel.value = ''; });
+  [districtPicker, areaPicker].forEach(clearPicker);
   apply(true);
 }));
 
