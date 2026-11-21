@@ -99,6 +99,27 @@ def _image(item: dict) -> str:
     return f"https://cdn.culture.ru/images/{public_id}"
 
 
+def _local_hm(raw) -> tuple[int, int] | None:
+    """Время сеанса в Новосибирске: в API оно в UTC, разница +7 часов."""
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})", str(raw or ""))
+    if not m:
+        return None
+    minutes = int(m.group(4)) * 60 + int(m.group(5)) + 7 * 60
+    return minutes // 60 % 24, minutes % 60
+
+
+def _seance_time(seance: dict) -> str:
+    """«11:00–19:00», если источник отдал конец сеанса, иначе только начало."""
+    start = _local_hm(seance.get("startDate"))
+    if not start:
+        return ""
+    text = f"{start[0]:02d}:{start[1]:02d}"
+    end = _local_hm(seance.get("endDate"))
+    if end and end[0] * 60 + end[1] > start[0] * 60 + start[1]:
+        text += f"–{end[0]:02d}:{end[1]:02d}"
+    return text
+
+
 def _price_text(price: dict | None) -> str:
     if not price:
         return ""
@@ -153,13 +174,8 @@ def _detail(page, item: dict, sat: str, sun: str) -> dict | None:
     text = _clean_text(ev)
     time_text = ""
     if seances:
-        # startDate в UTC; Новосибирск — UTC+7.
-        first = seances[0]
-        raw = str(first.get("startDate") or "")
-        m = re.match(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})", raw)
-        if m:
-            hour = (int(m.group(4)) + 7) % 24
-            time_text = f"{hour:02d}:{m.group(5)}"
+        # Берём первый сеанс выходных: время и его конец приходят в UTC.
+        time_text = _seance_time(seances[0])
 
     start = min((s.get("localeStartDate") for s in seances), default="") or ""
     end = max((s.get("localeStartDate") for s in seances), default="") or ""
