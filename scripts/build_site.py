@@ -829,10 +829,14 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
   </header>
 
   <main id="events">
+  <div class="intro">
+    <div class="intro__text">
   <h1>{esc(h1 or title)}</h1>
   <p class="lead">{esc(lead)}</p>
 {release_html}
+    </div>
   {offer_block()}
+  </div>
   {controls}
 
 {sr_heading}  <div class="grid">{cards}</div>
@@ -1457,6 +1461,15 @@ footer{margin-top:32px;color:var(--muted);font-size:13px}
 .statyi p{margin:6px 0 0;font-size:15px;color:var(--muted)}
 /* Приглашение прислать событие: компактная строка под описанием выпуска.
    В каталоге больше двухсот карточек, и блок в самом низу никто не увидит. */
+/* На широком экране приглашение стоит справа от заголовка: полоса под описанием
+   съедала высоту первого экрана, а каталог и без неё длинный. */
+.intro{display:grid;gap:18px}
+@media (min-width:1000px){
+  .intro{grid-template-columns:minmax(0,1fr) 380px;align-items:end;gap:32px}
+  .intro .offer{margin:0;flex-direction:column;align-items:flex-start;gap:14px}
+  .intro .offer__text{flex:none}
+  .intro .offer a{width:100%}
+}
 .offer{display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin:18px 0 0;
   padding:14px 20px;border:1px solid var(--line);border-radius:12px;background:var(--media-bg)}
 .offer__text{flex:1 1 300px;min-width:0}
