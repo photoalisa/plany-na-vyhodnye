@@ -19,6 +19,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from .model import COLUMNS
+from . import text as textmod
 
 SHEET_NAME = "nsk_weekend"
 DATA_TAB = "events"
@@ -33,6 +34,9 @@ BASE_TAB = "parsed"
 # Служебные колонки пишем всегда от парсера: id — ключ строки, остальное —
 # отметки времени. Их правка ломает сопоставление и сравнение.
 SERVICE_COLUMNS = ("id", "parsed_at", "checked_at")
+# Насколько похожими должны быть названия, чтобы считать строки одним событием:
+# «История Башни» и «Еженедельные экскурсии „История Башня“» — дубль.
+TWIN_RATIO = 0.82
 RUNS_COLUMNS = ["run_at", "source", "collected", "kept", "new", "updated", "errors", "note"]
 CREDENTIALS = "credentials.json"
 BATCH = 200
@@ -84,6 +88,18 @@ def _retry(func, *args, **kwargs):
     raise last_error  # type: ignore[misc]
 
 
+def _source_prio(name: str) -> int:
+    """Меньше число — первичнее источник. Незнакомые имена считаем средними."""
+    try:
+        from config import SOURCES
+    except Exception:  # noqa: BLE001
+        return 50
+    for src in SOURCES:
+        if src.name == name:
+            return src.prio
+    return 50
+
+
 class SheetStore:
     """Обёртка над gspread с upsert. Или CSV-фолбэк, если нет доступа."""
 
@@ -96,6 +112,7 @@ class SheetStore:
         self.existing: dict[str, int] = {}
         self.by_url: dict[str, int] = {}
         self.by_title_date: dict[str, int | None] = {}
+        self.twins: list[tuple[int, str, str, str]] = []
         self.rows: list[list[str]] = []
         # Снимок прошлого прогона: по нему отличаем ручные правки от данных.
         self.base_rows: dict[str, list] = {}
@@ -164,6 +181,12 @@ class SheetStore:
         url_col = COLUMNS.index("source_url")
         title_col = COLUMNS.index("title")
         start_col = COLUMNS.index("date_start")
+        end_col = COLUMNS.index("date_end")
+        venue_col = COLUMNS.index("venue")
+        status_col = COLUMNS.index("status")
+        # Для поиска межуточных дублей: агрегатор и площадка называют одно
+        # событие по-разному, но дата начала и площадка у них совпадают.
+        self.twins: list[tuple[int, str, str, str]] = []
         ambiguous_urls: set[str] = set()
         for idx, row in enumerate(values[1:], start=2):
             if row and row[0].strip():
@@ -186,8 +209,46 @@ class SheetStore:
                 )
                 if key:
                     self.by_title_date[key] = idx if key not in self.by_title_date else None
+                status = row[status_col] if len(row) > status_col else ""
+                if status == "active":
+                    norm = textmod.normalize_title(
+                        row[title_col] if len(row) > title_col else "")
+                    start = row[start_col] if len(row) > start_col else ""
+                    if norm and start:
+                        self.twins.append((
+                            idx, norm, start,
+                            row[end_col] if len(row) > end_col else "",
+                            row[venue_col] if len(row) > venue_col else "",
+                        ))
         for url in ambiguous_urls:
             self.by_url.pop(url, None)
+
+    def _find_twin(self, ev: dict) -> int | None:
+        """Активная строка о том же событии: пересекающиеся даты, похожее название и площадка."""
+        norm = textmod.normalize_title(ev.get("title", ""))
+        start = ev.get("date_start", "")
+        if not norm or not start:
+            return None
+        end = ev.get("date_end") or start
+        venue = (ev.get("venue") or "").lower()
+        for idx, other_norm, other_start, other_end, other_venue in self.twins:
+            # Агрегатор и площадка часто ставят разные рамки у одной выставки,
+            # поэтому сравниваем не начало, а пересечение периодов.
+            if (other_end or other_start) < start or end < other_start:
+                continue
+            if textmod.similar(norm, other_norm) < TWIN_RATIO:
+                continue
+            # Разные площадки — разные события, даже если названия совпали:
+            # «Экскурсия по выставке» есть почти в каждом музее.
+            other_venue = (other_venue or "").lower()
+            if venue and other_venue and not (
+                venue in other_venue
+                or other_venue in venue
+                or textmod.similar(venue, other_venue) >= 0.6
+            ):
+                continue
+            return idx
+        return None
 
     def _log_sheet(self):
         """Лист прогонов; никогда не совпадает с листом данных."""
@@ -329,6 +390,19 @@ class SheetStore:
                 # Ссылку могли поправить руками — тогда ищем по названию и дате.
                 key = _title_key(row[title_col], row[start_col])
                 idx = self.by_title_date.get(key) if key else None
+            if idx is None:
+                twin = self._find_twin(ev)
+                if twin is not None:
+                    source_col = COLUMNS.index("source")
+                    old_row = self.rows[twin - 1]
+                    old_source = old_row[source_col] if len(old_row) > source_col else ""
+                    if _source_prio(ev.get("source", "")) < _source_prio(old_source):
+                        # Новый источник первичнее: занимаем строку агрегатора.
+                        idx = twin
+                    else:
+                        # Карточка от площадки уже есть, агрегатор её не дублирует.
+                        stats["skipped"] = stats.get("skipped", 0) + 1
+                        continue
             if idx is None:
                 to_append.append(row)
                 stats["new"] += 1
