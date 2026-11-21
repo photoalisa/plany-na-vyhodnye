@@ -202,6 +202,8 @@ def parse_args(argv=None):
     parser.add_argument("--limit", type=int, default=0, help="ограничить число событий (тест)")
     parser.add_argument("--date", metavar="YYYY-MM-DD", help="считать эту дату «сегодня» (тест)")
     parser.add_argument("--hide", metavar="URL|ID", help="скрыть событие навсегда")
+    parser.add_argument("--record-deletions", action="store_true",
+                        help="запомнить строки, удалённые из таблицы вручную, и выйти")
     parser.add_argument("--hidden", action="store_true", help="показать скрытые события")
     parser.add_argument("--close", nargs=2, metavar=("ПЛОЩАДКА", "YYYY-MM-DD"),
                         help="площадка закрыта в этот день (санитарный день, ремонт)")
@@ -224,6 +226,14 @@ def main(argv=None) -> int:
     if store.book is not None:
         hidden.merge_csv()
     closures = ClosureStore(book=store.book)
+
+    if args.record_deletions:
+        # Удаления из таблицы запоминаем без полного прогона: событие больше
+        # не вернётся при следующем сборе.
+        marked = prepare_hidden(hidden, store)
+        save_last_ids(set(store.existing))
+        print(f"[+] Запомнено удалённых: {marked}")
+        return 0
 
     if args.closed:
         print(closures.summary())
