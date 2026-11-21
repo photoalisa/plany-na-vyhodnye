@@ -272,6 +272,11 @@ def main(argv=None) -> int:
     )
 
     events = build.events
+    if args.no_images:
+        # Афиши не проверялись: в таблице нельзя ставить FALSE, иначе рабочие
+        # картинки прошлого прогона превратятся в заглушки на сайте.
+        for ev in events:
+            ev["_image_unchecked"] = True
     if args.limit:
         events = events[: args.limit]
 
