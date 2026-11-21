@@ -102,6 +102,13 @@ INVARIANTS = [
      "`common/sheets.move_inactive`: строка, чей `id` уже лежит в `archive`, "
      "второй раз не копируется, но из `events` удаляется. Прошедшие ручные "
      "события переносит и `scripts/manual_add.py` сразу после записи."),
+    ("Карточка агрегатора не дублирует карточку площадки",
+     "`common/sheets._find_twin`: при записи ищется активная строка с пересекающимися "
+     "датами, похожестью названия не ниже 0.82 и совместимой площадкой. Сравнение "
+     "названий — `text.normalize_title` без служебных слов и числа, похожесть — "
+     "`text.similar`. Побеждает источник с меньшим `prio` в `config.py`; если агрегатор "
+     "записан раньше, его строка занимается первоисточником, иначе новая не добавляется. "
+     "Накопленные пары убирает `scripts/dedupe_twins.py` (предпросмотр и `--apply`)."),
 ]
 
 FILES = [
@@ -120,6 +127,8 @@ FILES = [
     ("scripts/build_site.py", "генерация сайта: страницы, фильтры, разметка"),
     ("scripts/import_csv.py", "перенос готовой выгрузки в таблицу"),
     ("scripts/dedupe.py", "уборка дублей по `id`, заполнение пустых `id`"),
+    ("scripts/dedupe_twins.py", "дубли агрегаторов рядом с карточками площадок: предпросмотр и `--apply`"),
+    ("scripts/refresh_images.py", "перепроверка афиш: после прогонов с `--no-images` восстанавливает `image_ok`"),
     ("scripts/fuzzy_dedupe.py", "похожие названия: проверка, без записи по умолчанию"),
     ("scripts/archive_move.py", "неактивные строки в лист `archive`"),
     ("scripts/refresh_snapshot.py", "обновление снимка `id` перед прогоном"),
@@ -274,7 +283,11 @@ def commands() -> list[str]:
         "python scripts/import_csv.py \"путь.csv\" --dry-run  # что изменится при импорте",
         "python scripts/import_csv.py \"путь.csv\" --archive-missing",
         "python scripts/dedupe.py --fill-ids                # дубли и пустые id",
+        "python scripts/dedupe_twins.py                     # дубли агрегаторов, предпросмотр",
+        "python scripts/dedupe_twins.py --apply             # убрать найденные",
         "python scripts/fuzzy_dedupe.py --dry-run           # похожие названия",
+        "python scripts/refresh_images.py --apply          # перепроверить афиши",
+        "python parser_main.py --record-deletions          # запомнить удаления из таблицы",
         "python scripts/archive_move.py                     # неактивные в archive",
         "",
         "python scripts/build_site.py --sheet --base /plany-na-vyhodnye --out dist_pages",
