@@ -52,6 +52,11 @@ _RE_TOKEN = re.compile(
     re.IGNORECASE,
 )
 _RE_TIME = re.compile(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)")
+# Период «13:00–17:00» или «с 13:00 до 17:00». Разделитель только тире или «до»:
+# перечисление сеансов через запятую не должно превращаться в диапазон.
+_RE_TIME_RANGE = re.compile(
+    r"(?<!\d)(\d{1,2}):(\d{2})\s*(?:-|–|—|до)\s*(\d{1,2}):(\d{2})(?!\d)"
+)
 _RE_NEAR = re.compile(r"ближайшее:\s*(\d{1,2})\.(\d{1,2})", re.IGNORECASE)
 _RE_WEEKDAY = re.compile(r"кажд\w*\s+(?:по\s+)?(суббот|воскресень|пятниц|понедельник|вторник|сред)", re.IGNORECASE)
 _RE_PERMANENT = re.compile(r"постоянн", re.IGNORECASE)
@@ -186,6 +191,13 @@ def _year_for_range(
 
 
 def _extract_time(text: str) -> str:
+    m = _RE_TIME_RANGE.search(text)
+    if m:
+        h1, m1 = int(m.group(1)), int(m.group(2))
+        h2, m2 = int(m.group(3)), int(m.group(4))
+        # Конец раньше начала — скорее не период, а две разные пометки.
+        if 0 <= h1 <= 23 and 0 <= h2 <= 23 and h2 * 60 + m2 > h1 * 60 + m1:
+            return f"{h1:02d}:{m1:02d}–{h2:02d}:{m2:02d}"
     m = _RE_TIME.search(text)
     if not m:
         return ""
@@ -292,7 +304,10 @@ def parse_datetime(raw: str, today: date | None = None) -> datetime | None:
         return None
     hh, mm = 0, 0
     if p.time_text:
-        hh, mm = (int(x) for x in p.time_text.split(":"))
+        # time_text бывает периодом («13:00–17:00»): для сортировки берём начало.
+        start = re.match(r"(\d{1,2}):(\d{2})", p.time_text)
+        if start:
+            hh, mm = int(start.group(1)), int(start.group(2))
     return datetime(p.start.year, p.start.month, p.start.day, hh, mm)
 
 
