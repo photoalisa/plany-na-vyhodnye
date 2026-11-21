@@ -1116,6 +1116,18 @@ def build(rows: list[dict], out: Path, today: date, base: str = "",
 
     events = [e for e in events_from_rows(rows) if on_weekend(e, sat, sun)]
 
+    # Расписание площадки знает не каждый источник: у музея строка-первоисточник
+    # приходит с open_days, а карточка агрегатора — без них. Иначе событие
+    # висело бы в воскресенье у музея, закрытого по воскресеньям.
+    venue_days: dict[str, str] = {}
+    for ev in events:
+        key = (ev.get("venue") or "").strip().lower()
+        if key and ev.get("open_days"):
+            venue_days.setdefault(key, ev["open_days"])
+    for ev in events:
+        if not ev.get("open_days"):
+            ev["open_days"] = venue_days.get((ev.get("venue") or "").strip().lower(), "")
+
     # Площадка может не работать в один из выходных дней (санитарный день,
     # ремонт): такой день вычитаем, а если закрыты оба — событие не показываем.
     kept: list[dict] = []
@@ -1465,8 +1477,10 @@ footer{margin-top:32px;color:var(--muted);font-size:13px}
    съедала высоту первого экрана, а каталог и без неё длинный. */
 .intro{display:grid;gap:18px}
 @media (min-width:1000px){
-  .intro{grid-template-columns:minmax(0,1fr) 380px;align-items:end;gap:32px}
-  .intro .offer{margin:0;flex-direction:column;align-items:flex-start;gap:14px}
+  .intro{grid-template-columns:minmax(0,1fr) 380px;align-items:stretch;gap:32px}
+  /* Карточка тянется на всю высоту заголовка с описанием и строкой выпуска. */
+  .intro .offer{margin:0;flex-direction:column;align-items:stretch;
+    justify-content:space-between;gap:14px;height:100%}
   .intro .offer__text{flex:none}
   .intro .offer a{width:100%}
 }
