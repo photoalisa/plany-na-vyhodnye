@@ -1483,6 +1483,12 @@ footer{margin-top:32px;color:var(--muted);font-size:13px}
     justify-content:space-between;gap:14px;height:100%}
   .intro .offer__text{flex:none}
   .intro .offer a{width:100%}
+  /* Внешние отступы заголовка и строки выпуска делали текст короче колонки,
+     и карточка торчала сверху и снизу. Строку выпуска прижимаем к низу:
+     тогда текст занимает ровно ту же высоту, что и карточка. */
+  .intro__text{display:flex;flex-direction:column}
+  .intro__text > h1{margin-top:0}
+  .intro__text > .release{margin-top:auto;margin-bottom:0}
 }
 .offer{display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin:18px 0 0;
   padding:14px 20px;border:1px solid var(--line);border-radius:12px;background:var(--media-bg)}
