@@ -37,25 +37,30 @@ def main(argv: list[str]) -> int:
         row = rows[row_idx - 1]
         return row[idx[column]] if len(row) > idx[column] else ""
 
-    losers: list[tuple[int, str, str, str]] = []
-    for row_idx, norm, start, end, venue in store.twins:
-        for other_idx, o_norm, o_start, o_end, o_venue in store.twins:
+    losers: list[tuple[int, int, str, str, str]] = []
+    for row_idx, norm, start, end, time_text, venue in store.twins:
+        for other_idx, o_norm, o_start, o_end, o_time, o_venue in store.twins:
             if other_idx == row_idx:
                 continue
             if (o_end or o_start) < start or (end or start) < o_start:
                 continue
-            if text.similar(norm, o_norm) < RATIO:
-                continue
             v1, v2 = venue.lower(), o_venue.lower()
-            if v1 and v2 and not (v1 in v2 or v2 in v1 or text.similar(v1, v2) >= 0.6):
+            same_venue = not (v1 and v2) or (
+                v1 in v2 or v2 in v1 or text.similar(v1, v2) >= 0.6
+            )
+            # Точное совпадение названия — дубль даже при разных названиях
+            # площадки: агрегатор пишет её по-своему.
+            close = text.similar(norm, o_norm) >= RATIO
+            prefix = bool(time_text) and time_text == o_time and sheets._prefix_clash(norm, o_norm)
+            if not (same_venue and (close or prefix)):
                 continue
             if prio.get(cell(other_idx, "source"), 50) < prio.get(cell(row_idx, "source"), 50):
-                losers.append((row_idx, cell(row_idx, "source"),
+                losers.append((row_idx, other_idx, cell(row_idx, "source"),
                                cell(row_idx, "title")[:44], cell(other_idx, "source")))
                 break
 
     print(f"дублей-агрегаторов: {len(losers)}")
-    for row_idx, name, title, winner in losers:
+    for row_idx, _winner, name, title, winner in losers:
         print(f"  строка {row_idx:3} {name:22} | {title} -> оставляем {winner}")
 
     if not losers:
@@ -65,11 +70,36 @@ def main(argv: list[str]) -> int:
         return 0
 
     status_col = idx["status"]
-    letter = sheets._col_letter(status_col + 1)
-    store.sheet.batch_update([
-        {"range": f"{letter}{row_idx}", "values": [["archived"]]}
+    status_letter = sheets._col_letter(status_col + 1)
+    body = [
+        {"range": f"{status_letter}{row_idx}", "values": [["archived"]]}
         for row_idx, *_ in losers
-    ])
+    ]
+
+    # Перед архивацией добираем в победителя то, чего у него нет: у площадки
+    # часто нет цены или афиши, а у агрегатора есть.
+    fill_fields = ("price_text", "is_free", "time_text", "image_url", "image_ok",
+                   "age", "is_child_friendly")
+    # «Уточняйте на сайте» — заглушка, а не цена: её можно заменить настоящей.
+    placeholders = {"", "уточняйте на сайте", "уточняйте"}
+    for row_idx, winner_idx, *_ in losers:
+        for name in fill_fields:
+            current = cell(winner_idx, name).strip()
+            value = cell(row_idx, name).strip()
+            if name == "price_text":
+                if current.lower() not in placeholders or value.lower() in placeholders:
+                    continue
+            elif name == "is_free":
+                # Бесплатность — факт: если агрегатор её знает, берём.
+                if current.upper() == "TRUE" or value.upper() != "TRUE":
+                    continue
+            elif current or not value:
+                continue
+            column = sheets._col_letter(idx[name] + 1)
+            body.append({"range": f"{column}{winner_idx}", "values": [[value]]})
+
+    for start in range(0, len(body), 50):
+        store.sheet.batch_update(body[start:start + 50], value_input_option="USER_ENTERED")
     moved = store.move_inactive()
     print(f"[+] помечено archived: {len(losers)}, перенесено в archive: {moved}")
     return 0
