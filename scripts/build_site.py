@@ -1477,18 +1477,12 @@ footer{margin-top:32px;color:var(--muted);font-size:13px}
    съедала высоту первого экрана, а каталог и без неё длинный. */
 .intro{display:grid;gap:18px}
 @media (min-width:1000px){
-  .intro{grid-template-columns:minmax(0,1fr) 380px;align-items:stretch;gap:32px}
-  /* Карточка тянется на всю высоту заголовка с описанием и строкой выпуска. */
-  .intro .offer{margin:0;flex-direction:column;align-items:stretch;
-    justify-content:space-between;gap:14px;height:100%}
+  /* Первый вариант: текст слева как есть, карточка справа своей высоты,
+     низ выровнен по нижнему краю описания. */
+  .intro{grid-template-columns:minmax(0,1fr) 380px;align-items:end;gap:32px}
+  .intro .offer{margin:0;flex-direction:column;align-items:flex-start;gap:14px}
   .intro .offer__text{flex:none}
   .intro .offer a{width:100%}
-  /* Внешние отступы заголовка и строки выпуска делали текст короче колонки,
-     и карточка торчала сверху и снизу. Строку выпуска прижимаем к низу:
-     тогда текст занимает ровно ту же высоту, что и карточка. */
-  .intro__text{display:flex;flex-direction:column}
-  .intro__text > h1{margin-top:0}
-  .intro__text > .release{margin-top:auto;margin-bottom:0}
 }
 .offer{display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin:18px 0 0;
   padding:14px 20px;border:1px solid var(--line);border-radius:12px;background:var(--media-bg)}
