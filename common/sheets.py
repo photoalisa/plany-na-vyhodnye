@@ -100,6 +100,12 @@ def _source_prio(name: str) -> int:
     return 50
 
 
+def _prefix_clash(left: str, right: str, size: int = 3) -> bool:
+    """Названия начинаются одинаково: «разговорный клуб английского …»."""
+    a, b = left.split(), right.split()
+    return len(a) >= size and len(b) >= size and a[:size] == b[:size]
+
+
 class SheetStore:
     """Обёртка над gspread с upsert. Или CSV-фолбэк, если нет доступа."""
 
@@ -112,7 +118,7 @@ class SheetStore:
         self.existing: dict[str, int] = {}
         self.by_url: dict[str, int] = {}
         self.by_title_date: dict[str, int | None] = {}
-        self.twins: list[tuple[int, str, str, str]] = []
+        self.twins: list[tuple[int, str, str, str, str, str]] = []
         self.rows: list[list[str]] = []
         # Снимок прошлого прогона: по нему отличаем ручные правки от данных.
         self.base_rows: dict[str, list] = {}
@@ -183,10 +189,11 @@ class SheetStore:
         start_col = COLUMNS.index("date_start")
         end_col = COLUMNS.index("date_end")
         venue_col = COLUMNS.index("venue")
+        time_col = COLUMNS.index("time_text")
         status_col = COLUMNS.index("status")
         # Для поиска межуточных дублей: агрегатор и площадка называют одно
         # событие по-разному, но дата начала и площадка у них совпадают.
-        self.twins: list[tuple[int, str, str, str]] = []
+        self.twins: list[tuple[int, str, str, str, str, str]] = []
         ambiguous_urls: set[str] = set()
         for idx, row in enumerate(values[1:], start=2):
             if row and row[0].strip():
@@ -218,6 +225,7 @@ class SheetStore:
                         self.twins.append((
                             idx, norm, start,
                             row[end_col] if len(row) > end_col else "",
+                            (row[time_col] if len(row) > time_col else "")[:5],
                             row[venue_col] if len(row) > venue_col else "",
                         ))
         for url in ambiguous_urls:
@@ -231,23 +239,34 @@ class SheetStore:
             return None
         end = ev.get("date_end") or start
         venue = (ev.get("venue") or "").lower()
-        for idx, other_norm, other_start, other_end, other_venue in self.twins:
+        time_text = (ev.get("time_text") or "")[:5]
+        for idx, other_norm, other_start, other_end, other_time, other_venue in self.twins:
             # Агрегатор и площадка часто ставят разные рамки у одной выставки,
             # поэтому сравниваем не начало, а пересечение периодов.
             if (other_end or other_start) < start or end < other_start:
                 continue
-            if textmod.similar(norm, other_norm) < TWIN_RATIO:
-                continue
-            # Разные площадки — разные события, даже если названия совпали:
-            # «Экскурсия по выставке» есть почти в каждом музее.
+            # Точное совпадение названия — дубль даже при разных названиях
+            # площадки: агрегатор пишет её по-своему.
+            if norm == other_norm:
+                return idx
             other_venue = (other_venue or "").lower()
-            if venue and other_venue and not (
+            same_venue = not (venue and other_venue) or (
                 venue in other_venue
                 or other_venue in venue
                 or textmod.similar(venue, other_venue) >= 0.6
+            )
+            if same_venue and textmod.similar(norm, other_norm) >= TWIN_RATIO:
+                return idx
+            # Площадка и агрегатор по-разному договаривают одно название:
+            # «Разговорный клуб английского языка для начинающих» и «… Speakify».
+            # Общие первые слова при той же площадке, дате и времени — дубль.
+            if (
+                same_venue
+                and time_text
+                and time_text == other_time
+                and _prefix_clash(norm, other_norm)
             ):
-                continue
-            return idx
+                return idx
         return None
 
     def _log_sheet(self):
