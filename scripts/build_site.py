@@ -255,7 +255,8 @@ def event_bounds(ev: dict, sat: date, sun: date) -> tuple[str, str]:
 
     times = re.findall(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", ev.get("time") or "")
     if not times:
-        return f"{first.isoformat()}T00:00:00", f"{last.isoformat()}T23:59:00"
+        return (f"{first.isoformat()}T00:00:00+07:00",
+                f"{last.isoformat()}T23:59:00+07:00")
 
     sh, sm = int(times[0][0]), int(times[0][1])
     eh, em = int(times[-1][0]), int(times[-1][1])
@@ -265,8 +266,10 @@ def event_bounds(ev: dict, sat: date, sun: date) -> tuple[str, str]:
     end_day = last
     if minutes >= 24 * 60:
         end_day, minutes = last + timedelta(days=1), minutes % (24 * 60)
-    return (f"{first.isoformat()}T{sh:02d}:{sm:02d}:00",
-            f"{end_day.isoformat()}T{minutes // 60:02d}:{minutes % 60:02d}:00")
+    # Смещение обязательно: без него браузер посетителя считает прошедшее
+    # по своей зоне и скрывает события не в то время.
+    return (f"{first.isoformat()}T{sh:02d}:{sm:02d}:00+07:00",
+            f"{end_day.isoformat()}T{minutes // 60:02d}:{minutes % 60:02d}:00+07:00")
 
 
 # --------------------------------------------------------------------- разметка
@@ -430,7 +433,7 @@ def card_html(ev: dict, weekend: bool = True) -> str:
     open_hint = f"Открыть страницу источника: {ev['title']}"
     return f"""
 <article class="card" {attrs}{day_attr}{end_attr}{start_attr} data-district="{esc(ev['district'])}" data-geo="{esc(ev['area'])}">
-  <a class="card__media" href="{esc(ev['url'])}" target="_blank" rel="noopener nofollow" title="{esc(open_hint)}">
+  <a class="card__media" href="{esc(ev['url'])}" target="_blank" rel="noopener nofollow" title="{esc(open_hint)}" tabindex="-1" aria-hidden="true">
     {image_html}
   </a>
   <div class="card__body">
@@ -462,7 +465,8 @@ def chips_html(active: str = "", events: list[dict] | None = None,
         if events is not None and key != active:
             if not any(ev["flags"].get(key) for ev in events):
                 continue
-        current = ' aria-current="page"' if key == active else ""
+        # Чип — переключатель, а не ссылка на текущую страницу.
+        current = ' aria-current="true"' if key == active else ""
         buttons.append(
             f'<a class="chip" href="/{slug}/" data-filter="{key}"{current}>{label}</a>'
         )
@@ -557,9 +561,15 @@ def json_ld(events: list[dict], page_name: str) -> str:
             "eventAttendanceMode": "https://schema.org/OfflineEventAttendanceMode",
             "eventStatus": "https://schema.org/EventScheduled",
         }
-        if ev["start"]:
-            item["startDate"] = ev["start"].isoformat() + (f"T{ev['time']}" if ev["time"] else "")
-        if ev["end"]:
+        # Даты для схемы — те же, что видит браузер: со смещением +07:00.
+        # Иначе Rich Results получает то дату без времени, то обрезанный период.
+        if ev.get("starts_at"):
+            item["startDate"] = ev["starts_at"]
+        elif ev["start"]:
+            item["startDate"] = ev["start"].isoformat()
+        if ev.get("ends_at"):
+            item["endDate"] = ev["ends_at"]
+        elif ev["end"]:
             item["endDate"] = ev["end"].isoformat()
         if ev["text"]:
             item["description"] = cut_text(ev["text"], 240)
@@ -838,6 +848,9 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
   {offer_block()}
   </div>
   {controls}
+  <p class="weekend-over" data-weekend-over hidden>
+    <strong>Эти выходные закончились.</strong> Следующий выпуск — в пятницу, пока показываем прошедшее.
+  </p>
 
 {sr_heading}  <div class="grid">{cards}</div>
 
@@ -1329,7 +1342,7 @@ h2{font-size:20px;margin:32px 0 12px}
 .chip{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
   padding:7px 14px;font-size:14px;cursor:pointer;font-family:inherit}
 a.chip{display:inline-flex;align-items:center;text-decoration:none}
-.chip[aria-pressed="true"],.chip[aria-current="page"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.chip[aria-pressed="true"],.chip[aria-current]{background:var(--accent);border-color:var(--accent);color:#fff}
 /* Дубль «Бесплатно» в верхней строке: до воскресенья он не нужен и скрыт. */
 .chip.chip--top{display:none}
 select{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
@@ -1414,6 +1427,10 @@ select{border:1px solid var(--line);background:transparent;color:var(--ink);bord
 .card--past .card__meta::after{content:" · уже прошло";color:var(--muted)}
 .past{margin:20px 0 0;font-size:14px;color:var(--muted)}
 .past .chip{margin-left:8px;font-size:13px;padding:5px 12px}
+/* выходные кончились: пустая сетка без объяснения читается как поломка */
+.weekend-over{margin:18px 0 0;padding:12px 16px;border:1px solid #E2DCCF;
+  background:#F6F2E8;color:#3A3A34;font-size:14px;line-height:1.5}
+.weekend-over strong{font-weight:600}
 .empty{display:none;padding:40px 0;color:var(--muted)}
 footer{margin-top:32px;color:var(--muted);font-size:13px}
 @media (max-width:640px){.grid{grid-template-columns:1fr}h1{font-size:24px}
@@ -1445,7 +1462,7 @@ footer{margin-top:32px;color:var(--muted);font-size:13px}
   .controls[data-open="false"] .controls__row--more{display:none}
   .controls[data-open="false"][data-active="true"] .controls__row--more{display:flex}
   .controls[data-open="false"] .controls__row--more > *{display:none}
-  .controls[data-open="false"] .controls__row--more > .chip[aria-current="page"],
+  .controls[data-open="false"] .controls__row--more > .chip[aria-current],
   .controls[data-open="false"] .controls__row--more > [data-reset]{display:inline-flex}
   .controls[data-open="false"] .controls__row--more > select.is-set{display:inline-block}}
 /* Статьи: узкая колонка для чтения, живой блок событий и перелинковка */
@@ -1548,6 +1565,7 @@ const counter = document.querySelector('[data-count]');
 const empty = document.querySelector('.empty');
 const controlsEl = document.querySelector('.controls');
 const toggleBtn = document.querySelector('.filters-toggle');
+const weekendOverEl = document.querySelector('[data-weekend-over]');
 let showPast = false;
 
 // Действия для счётчика: GoatCounter не ставит cookie и не хранит персональные
@@ -1566,9 +1584,10 @@ function track(action, label){
 const active = new Set();
 chips.forEach(chip => {
   const key = chip.dataset.filter;
-  if (params.get(key) === '1' || chip.getAttribute('aria-current') === 'page') {
+  if (params.get(key) === '1' || chip.getAttribute('aria-current') === 'page'
+      || chip.getAttribute('aria-current') === 'true') {
     active.add(key);
-    chip.setAttribute('aria-current', 'page');
+    chip.setAttribute('aria-current', 'true');
   }
 });
 
@@ -1672,7 +1691,6 @@ function apply(animate){
   const cityWide = districts.includes('city');
   const districtNames = districts.filter(v => v !== 'city');
   let shown = 0, past = 0;
-  const visibleCards = [];
   for (const card of cards){
     const okFlags = [...active].every(k => card.dataset[k] === 'true');
     const inCity = (card.dataset.geo || 'Новосибирск') === 'Новосибирск';
@@ -1689,23 +1707,15 @@ function apply(animate){
     const visible = matches && (!gone || showPast);
     card.hidden = !visible;
     card.style.display = visible ? '' : 'none';
-    if (visible) { shown++; visibleCards.push(card); }
+    if (visible) shown++;
   }
 
-  // Участники теста принимали неизменный порядок за сломанные фильтры:
-  // первая пара карточек подходила под любой фильтр и оставалась на месте.
-  // Пересобираем сетку по времени начала и подсвечиваем, что выдача изменилась.
-  if (gridEl){
-    visibleCards.sort((a, b) =>
-      (a.dataset.start || a.dataset.end || '').localeCompare(b.dataset.start || b.dataset.end || '')
-    );
-    for (const card of visibleCards) gridEl.appendChild(card);
-    for (const card of cards) if (card.hidden) gridEl.appendChild(card);
-    if (animate){
-      gridEl.classList.remove('grid--flash');
-      void gridEl.offsetWidth;
-      gridEl.classList.add('grid--flash');
-    }
+  // Порядок карточек не меняем: сервер отсортировал их по времени начала, а
+  // перестановка узлов после фильтрации сбивала фокус и дёргала сетку.
+  if (gridEl && animate){
+    gridEl.classList.remove('grid--flash');
+    void gridEl.offsetWidth;
+    gridEl.classList.add('grid--flash');
   }
 
   if (counter) {
@@ -1714,6 +1724,11 @@ function apply(animate){
       : shown + ' из ' + cards.length;
   }
   if (empty) empty.style.display = shown || past ? 'none' : 'block';
+  // Воскресным вечером прошедшими оказываются все карточки. Пустая сетка
+  // без объяснения выглядит как поломка: показываем прошедшее и говорим прямо.
+  const allPast = past > 0 && (shown === 0 || shown === past);
+  if (weekendOverEl) weekendOverEl.hidden = !allPast;
+  if (allPast && !showPast) { showPast = true; return apply(animate); }
   updatePast(past);
   syncFilters();
   syncUrl();
@@ -1732,7 +1747,7 @@ chips.forEach(chip => chip.addEventListener('click', (e) => {
   // Одна метка может стоять дважды: в верхней строке на телефоне и в шторке.
   // Подсветку переносим на все копии, иначе непонятно, включён фильтр или нет.
   chips.filter(c => c.dataset.filter === key).forEach(c => {
-    if (active.has(key)) c.setAttribute('aria-current', 'page');
+    if (active.has(key)) c.setAttribute('aria-current', 'true');
     else c.removeAttribute('aria-current');
   });
   apply(true);
