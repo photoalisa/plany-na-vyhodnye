@@ -208,7 +208,11 @@ def on_weekend(ev: dict, sat: date, sun: date) -> bool:
     if not ev["start"]:
         return False
     end = ev["end"] or ev["start"]
-    return ev["start"] <= sun and end >= max(sat, date.today())
+    # «Сегодня» — по Новосибирску и с учётом --now, а не по часам машины:
+    # иначе сборка на понедельник выбрасывала события прошлых выходных
+    # и QA-прогоны с --date считали не тот набор.
+    cutoff = max(sat, now_nsk().date())
+    return ev["start"] <= sun and end >= cutoff
 
 
 def open_weekdays(ev: dict) -> set[int] | None:
@@ -255,7 +259,8 @@ def event_bounds(ev: dict, sat: date, sun: date) -> tuple[str, str]:
 
     times = re.findall(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", ev.get("time") or "")
     if not times:
-        return f"{first.isoformat()}T00:00:00", f"{last.isoformat()}T23:59:00"
+        return (f"{first.isoformat()}T00:00:00+07:00",
+                f"{last.isoformat()}T23:59:00+07:00")
 
     sh, sm = int(times[0][0]), int(times[0][1])
     eh, em = int(times[-1][0]), int(times[-1][1])
@@ -265,8 +270,10 @@ def event_bounds(ev: dict, sat: date, sun: date) -> tuple[str, str]:
     end_day = last
     if minutes >= 24 * 60:
         end_day, minutes = last + timedelta(days=1), minutes % (24 * 60)
-    return (f"{first.isoformat()}T{sh:02d}:{sm:02d}:00",
-            f"{end_day.isoformat()}T{minutes // 60:02d}:{minutes % 60:02d}:00")
+    # Смещение обязательно: без него браузер посетителя считает прошедшее
+    # по своей зоне и скрывает события не в то время.
+    return (f"{first.isoformat()}T{sh:02d}:{sm:02d}:00+07:00",
+            f"{end_day.isoformat()}T{minutes // 60:02d}:{minutes % 60:02d}:00+07:00")
 
 
 # --------------------------------------------------------------------- разметка
@@ -401,45 +408,38 @@ def card_html(ev: dict, weekend: bool = True) -> str:
         venue = venue[:67].rstrip(" ,.-–—") + "…"
     if venue:
         meta.append(venue)
-    # Дата и место идут двумя строками со значками: в одну строку они
-    # срастались в «21 ноября · Октябрьский · ГПНТБ СО РАН» и читались как
-    # одно длинное предложение.
-    place_line = " · ".join(meta[1:])
-    meta_html = (f'<span class="card__meta-row">{ICON_CALENDAR}'
-                 f'<span>{esc(meta[0])}</span></span>')
-    if place_line:
-        meta_html += (f'<span class="card__meta-row card__meta-row--muted">{ICON_PIN}'
-                      f'<span>{esc(place_line)}</span></span>')
+    # Мета — одной строкой без иконок: дата, место, площадка.
+    meta_line = " · ".join(part for part in meta if part)
     attrs = " ".join(f'data-{k}="{str(v).lower()}"' for k, v in ev["flags"].items())
     day_attr = f' data-days="{" ".join(ev.get("days") or [])}"' if ev.get("days") else ""
     # data-end — конец события по часам посетителя: по нему браузер скрывает
     # прошедшее, чтобы в воскресенье вечером не висели субботние концерты.
     end_attr = f' data-end="{ev["ends_at"]}"' if ev.get("ends_at") else ""
     start_attr = f' data-start="{ev["starts_at"]}"' if ev.get("starts_at") else ""
-    price = ev["price"] or ("Бесплатно" if ev["flags"]["free"] else "Цена на сайте")
-    # Возрастная маркировка (436-ФЗ) — рядом с ценой, чтобы была видна сразу.
+    price_parts = []
+    if ev["price"]:
+        price_parts.append(ev["price"])
+    elif ev["flags"]["free"]:
+        price_parts.append("Бесплатно")
     if ev.get("age"):
-        price = f"{price} · {ev['age']}"
-    # Участники теста не понимали, что ссылка уводит на чужой сайт: подписываем
-    # переход словами и значком внешней ссылки.
-    # Ссылка ведёт не всегда на сайт организатора: это может быть группа во
-    # «ВКонтакте», билетный сервис или другой агрегатор. Поэтому говорим
-    # «страница источника», не обещая, кто именно её ведёт.
-    link_label = ("Подробнее на странице источника "
-                  "<span aria-hidden=\"true\">↗</span>")
+        price_parts.append(ev["age"])
+    price = " · ".join(price_parts)
+    price_html = f'<p class="card__price">{esc(price)}</p>' if price else ""
+    # Одна ссылка на карточку в Tab-порядке. Афиша кликабельна мышью, но
+    # не создаёт вторую остановку; отчёт об ошибке живёт в подвале.
+    link_label = "К источнику <span aria-hidden=\"true\">↗</span>"
     open_hint = f"Открыть страницу источника: {ev['title']}"
     return f"""
 <article class="card" {attrs}{day_attr}{end_attr}{start_attr} data-district="{esc(ev['district'])}" data-geo="{esc(ev['area'])}">
-  <a class="card__media" href="{esc(ev['url'])}" target="_blank" rel="noopener nofollow" title="{esc(open_hint)}">
+  <a class="card__media" href="{esc(ev['url'])}" target="_blank" rel="noopener nofollow" tabindex="-1" aria-hidden="true">
     {image_html}
   </a>
   <div class="card__body">
-    <p class="card__meta">{meta_html}</p>
+    <p class="card__meta">{esc(meta_line)}</p>
     <h3 class="card__title">{esc(ev['title'])}</h3>
     <p class="card__text">{esc(cut_text(ev['text']))}</p>
-    <p class="card__price">{esc(price)}</p>
-    <a class="card__link" href="{esc(ev['url'])}" target="_blank" rel="noopener nofollow">{link_label}</a>
-    {report_link()}
+    {price_html}
+    <a class="card__link" href="{esc(ev['url'])}" target="_blank" rel="noopener nofollow" aria-label="{esc(open_hint)}">{link_label}</a>
   </div>
 </article>"""
 
@@ -462,7 +462,8 @@ def chips_html(active: str = "", events: list[dict] | None = None,
         if events is not None and key != active:
             if not any(ev["flags"].get(key) for ev in events):
                 continue
-        current = ' aria-current="page"' if key == active else ""
+        # Чип — переключатель, а не ссылка на текущую страницу.
+        current = ' aria-current="true"' if key == active else ""
         buttons.append(
             f'<a class="chip" href="/{slug}/" data-filter="{key}"{current}>{label}</a>'
         )
@@ -557,9 +558,15 @@ def json_ld(events: list[dict], page_name: str) -> str:
             "eventAttendanceMode": "https://schema.org/OfflineEventAttendanceMode",
             "eventStatus": "https://schema.org/EventScheduled",
         }
-        if ev["start"]:
-            item["startDate"] = ev["start"].isoformat() + (f"T{ev['time']}" if ev["time"] else "")
-        if ev["end"]:
+        # Даты для схемы — те же, что видит браузер: со смещением +07:00.
+        # Иначе Rich Results получает то дату без времени, то обрезанный период.
+        if ev.get("starts_at"):
+            item["startDate"] = ev["starts_at"]
+        elif ev["start"]:
+            item["startDate"] = ev["start"].isoformat()
+        if ev.get("ends_at"):
+            item["endDate"] = ev["ends_at"]
+        elif ev["end"]:
             item["endDate"] = ev["end"].isoformat()
         if ev["text"]:
             item["description"] = cut_text(ev["text"], 240)
@@ -591,33 +598,18 @@ def json_ld(events: list[dict], page_name: str) -> str:
 
 
 def report_link() -> str:
-    """Кнопка «Сообщить об ошибке» на карточке (однополевая Яндекс Форма)."""
+    """Ссылка «Сообщить об ошибке»: одна на сайт, в подвале."""
     if not FORM_URL:
         return ""
-    return (f'<a class="card__report" href="{esc(FORM_URL)}" '
-            f'target="_blank" rel="noopener nofollow">Сообщить об ошибке</a>')
+    return (f'<a href="{esc(FORM_URL)}" target="_blank" '
+            f'rel="noopener nofollow" data-track="report">Сообщить об ошибке</a>')
 
 
 def offer_link() -> str:
     if not FORM_URL:
         return ""
-    return f'<a href="{esc(FORM_URL)}" target="_blank" rel="noopener nofollow">Предложить событие</a>'
-
-
-# Значки в мета-строке карточки: календарь для даты, метка для места.
-# Контурные, 16 px, цвет наследуют от строки, поэтому работают и в тёмной теме.
-ICON_CALENDAR = (
-    '<svg class="card__icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" '
-    'focusable="false"><rect x="2.2" y="3.4" width="11.6" height="10.2" rx="2" fill="none" '
-    'stroke="currentColor" stroke-width="1.3"/><path d="M2.2 6.6h11.6M5.4 2.1v2.4M10.6 2.1v2.4" '
-    'fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>'
-)
-ICON_PIN = (
-    '<svg class="card__icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" '
-    'focusable="false"><path d="M8 14.3s4.6-4.2 4.6-7.5A4.6 4.6 0 0 0 3.4 6.8c0 3.3 4.6 7.5 4.6 7.5z" '
-    'fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>'
-    '<circle cx="8" cy="6.7" r="1.65" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>'
-)
+    return (f'<a href="{esc(FORM_URL)}" target="_blank" rel="noopener nofollow" '
+            f'data-track="offer">Предложить событие</a>')
 
 
 def offer_block() -> str:
@@ -726,16 +718,36 @@ def llms_txt(events: list[dict], articles: list | None = None) -> str:
 
 def footer_html(articles_link: bool = False) -> str:
     """Общий подвал: одинаковый на каталоге, подборках и статьях."""
-    link = '<a href="/statyi/">Статьи</a> · ' if articles_link else ""
+    articles = '<a href="/statyi/">Статьи</a>' if articles_link else ""
     return f"""<footer>
-    {link}Сайт не просит персональные данные и не хранит афиши: изображения
+  <p class="footer__mark">Планы на <em>выходные</em></p>
+  <div class="footer__cols">
+    <p class="footer__legal">Сайт не просит персональные данные и не хранит афиши: изображения
     загружаются по ссылке источника. Карточка ведёт на страницу источника,
     где можно узнать подробности и купить билет. Ответственность за
     актуальность события несёт организатор. Возрастные ограничения — по
     данным организаторов, у остальных событий метки нет.
     <br>Афиши принадлежат организаторам и их правообладателям: по запросу
-    удаляем. {offer_link()}{stats_note()}
-  </footer>"""
+    удаляем. {offer_link()} · {report_link()}{stats_note()}</p>
+    <nav class="footer__nav" aria-label="Разделы">
+      <a href="/">Каталог</a>
+      {articles}
+    </nav>
+  </div>
+  <p class="footer__fine">Новосибирск · выпуск по понедельникам и пятницам · собрано вручную из 23 источников</p>
+</footer>"""
+
+
+def plural_ru(n: int) -> str:
+    """«1 событие», «2 события», «141 событие», «65 событий»."""
+    m, d = n % 100, n % 10
+    if 10 < m < 20:
+        return "событий"
+    if d == 1:
+        return "событие"
+    if 2 <= d <= 4:
+        return "события"
+    return "событий"
 
 
 def page_html(*, title: str, description: str, lead: str, events: list[dict],
@@ -747,12 +759,103 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
     canonical_url = f"{SITE_URL}/{path}".rstrip("/") + ("/" if path else "/")
     canonical_url = canonical or canonical_url
 
-    sr_heading = '  <h2 class="sr-only">События</h2>\n' if events else ""
+    is_home = path == "" and bool(events)
+    is_404 = path == "404.html"
+    now_iso = now_nsk().strftime("%Y-%m-%dT%H:%M:%S+07:00")
+    future = [ev for ev in events if (ev.get("ends_at") or "") > now_iso]
+    # В воскресенье вечером заканчиваются все события: пустая сетка без
+    # объяснения выглядит как поломка. Показываем прошедшее и говорим прямо.
+    weekend_over = bool(events) and not future
+    free_future = sum(1 for ev in future if ev["flags"]["free"])
+    free_total = sum(1 for ev in events if ev["flags"]["free"])
+    venues_future = len({ev["venue"] for ev in future if ev.get("venue")})
+    venues_total = len({ev["venue"] for ev in events if ev.get("venue")})
+
     release_html = ""
     if release is not None:
         release_html = (
-            f'  <p class="release"><time datetime="{release.date().isoformat()}">'
-            f"{esc(release_label(release))}</time></p>\n"
+            f'<p class="release"><time datetime="{release.date().isoformat()}">'
+            f"{esc(release_label(release))}</time> · афиши и ссылки — у организаторов</p>"
+        )
+
+    # Первый экран — кинокадр: заголовок разбит на две строки, вторая курсивом.
+    hero_title = f"<span><i>{esc(h1 or title)}</i></span>"
+    if is_home:
+        words = (h1 or title).split()
+        if len(words) > 2:
+            # Пробел между строками обязателен: иначе textContent склеивает
+            # «пойти» и «на» в одно слово для копирования и скринридеров.
+            hero_title = (f"<span><i>{esc(' '.join(words[:-2]))}</i></span> "
+                          f"<span><i><em>{esc(' '.join(words[-2:]))}</em></i></span>")
+    hero_media = ""
+    hero_preload = ""
+    if is_home:
+        hero_preload = (
+            '<link rel="preload" as="image" href="/assets/img/hero-nsk.jpg" '
+            'imagesrcset="assets/img/hero-nsk-1280.jpg 1280w, '
+            'assets/img/hero-nsk.jpg 1920w" imagesizes="100vw">'
+        )
+        hero_media = (
+            '<div class="hero__media" aria-hidden="true">'
+            '<img class="hero__img" src="/assets/img/hero-nsk.jpg" '
+            'srcset="assets/img/hero-nsk-1280.jpg 1280w, assets/img/hero-nsk.jpg 1920w" '
+            'sizes="100vw" alt="" width="1920" height="1716" '
+            'fetchpriority="high" decoding="async"></div>'
+            '<div class="hero__veil" aria-hidden="true"></div>'
+            '<div class="hero__glow" aria-hidden="true"></div>'
+            '<p class="hero__caption">56°01′ N · 82°55′ E<br>Настроение выпуска</p>'
+        )
+
+    eyebrow_label = "Афиша" if is_home else ("Подборка" if events else "404")
+    stat_events = len(events) if weekend_over else len(future)
+    stat_free = free_total if weekend_over else free_future
+    stat_venues = venues_total if weekend_over else venues_future
+    hero_stats = ""
+    if events:
+        hero_stats = (
+            '<dl class="hero__stats">'
+            f'<div><dt>событий</dt><dd class="stat__num">{stat_events}</dd></div>'
+            f'<div><dt>бесплатных</dt><dd class="stat__num">{stat_free}</dd></div>'
+            f'<div><dt>площадок</dt><dd class="stat__num">{stat_venues}</dd></div>'
+            "</dl>"
+        )
+    hero_actions = ""
+    if is_404:
+        hero_actions = ('<div class="hero__actions">'
+                        '<a class="btn" href="/">Вернуться в каталог'
+                        '<span class="btn__arrow" aria-hidden="true">→</span></a></div>')
+    elif events:
+        label = "Показать прошедшее" if weekend_over else "Смотреть события"
+        hero_actions = ('<div class="hero__actions">'
+                        f'<a class="btn" href="#catalog">{label}'
+                        '<span class="btn__arrow" aria-hidden="true">→</span></a>')
+        if active_filter:
+            hero_actions += '<a class="btn btn--ghost" href="/">Весь каталог</a>'
+        elif free_future:
+            hero_actions += (f'<a class="btn btn--ghost" href="/besplatno/">'
+                             f"Бесплатно · {free_future}</a>")
+        hero_actions += "</div>"
+
+    weekend_notice = ""
+    if weekend_over:
+        weekend_notice = (
+            '<div class="weekend-over" role="status">'
+            '<p class="weekend-over__title">Эти выходные закончились.</p>'
+            "<p>Следующий выпуск — в пятницу. Пока показываем прошедшее.</p>"
+            "</div>"
+        )
+
+    catalog_head = ""
+    if events:
+        title_line = f"Выпуск {weekend_label()}" if is_home else "События"
+        count_line = f"{len(events)} {plural_ru(len(events))}"
+        if is_home:
+            count_line += " · обновляется по понедельникам и пятницам"
+        catalog_head = (
+            '<div class="catalog-head">'
+            f'<h2 id="catalog-title">{esc(title_line)}</h2>'
+            f"<p>{esc(count_line)}</p>"
+            "</div>"
         )
 
     controls = ""
@@ -775,7 +878,7 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
             # и только в воскресенье, когда кнопки «Суббота» рядом уже нет.
             + '<a class="chip chip--top" href="/besplatno/" data-filter="free">Бесплатно</a>'
             + f'<span class="count" role="status" aria-live="polite" aria-atomic="true">'
-              f'<span data-count>{len(events)}</span></span>'
+              f'<span data-count>{len(events)} {plural_ru(len(events))}</span></span>'
             + '<button class="filters-toggle" type="button" aria-expanded="false" '
               'aria-controls="filters-more" aria-label="Показать фильтры">'
               '<svg class="filters-toggle__icon" viewBox="0 0 24 24" width="20" height="20" fill="none" '
@@ -795,10 +898,29 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
             "</div>"
         )
 
+    catalog_block = ""
+    if not is_404:
+        catalog_block = f"""
+  <section class="catalog"{' aria-labelledby="catalog-title"' if events else ''}>
+  {catalog_head}
+  <div class="grid">{cards}</div>
+
+  <p class="past" data-past hidden>
+    <span data-past-label>Прошедшие события скрыты.</span>
+    <button class="chip" data-past-toggle aria-pressed="false"></button>
+  </p>
+
+  <p class="empty" data-empty>
+    <span data-empty-text>По этим фильтрам на выходные ничего нет.</span>
+    <button class="chip" data-reset>Сбросить фильтры</button>
+  </p>
+  </section>"""
+
     return f"""<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
+<script>document.documentElement.classList.add('js');setTimeout(function(){{if(!window.__revealReady)document.documentElement.classList.add('reveal-off')}},3000)</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{esc(title)}</title>
 <meta name="description" content="{esc(description)}">
@@ -812,43 +934,48 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
 <meta property="og:image" content="{SITE_URL}/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Планы на выходные — афиша Новосибирска">
 <meta property="og:locale" content="ru_RU">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="theme-color" content="#FBFAF7">
+<meta name="twitter:image" content="{SITE_URL}/og.png">
+<meta name="theme-color" content="#0B0D0C">
+<link rel="preload" href="/assets/fonts/cormorant-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/golos-text-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+{hero_preload}
 <link rel="stylesheet" href="/assets/style.css?v={BUILD_VERSION}">
 <link rel="icon" href="/mark.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <script type="application/ld+json">{json_ld(events, title)}</script>
 </head>
-<body>
-<a class="skip-link" href="#events">Перейти к содержимому</a>
+<body class="page page--catalog"{' data-weekend-over="true"' if weekend_over else ''}>
+<div class="grain" aria-hidden="true"></div>
+<div class="progress" aria-hidden="true"><span></span></div>
+<a class="skip-link" href="{'#events' if is_404 else '#catalog'}">Перейти к содержимому</a>
 <div class="wrap">
   <header class="top">
     {header_html()}
   </header>
 
-  <main id="events">
-  <div class="intro">
-    <div class="intro__text">
-  <h1>{esc(h1 or title)}</h1>
-  <p class="lead">{esc(lead)}</p>
-{release_html}
+  <main id="events"{' data-show-past="true"' if weekend_over else ''}>
+  <section class="{'hero hero--photo' if is_home else 'hero hero--masthead'}"
+           aria-labelledby="hero-title">
+  {hero_media}
+    <div class="hero__inner">
+      <p class="eyebrow"><span>{eyebrow_label}</span><span>Новосибирск</span>
+        <span>{esc(weekend_label())}</span></p>
+      <h1 class="hero__title" id="hero-title">{hero_title}</h1>
+      <p class="hero__lead">{esc(lead)}</p>
+      {hero_actions}
     </div>
-  {offer_block()}
-  </div>
+    {hero_stats}
+    {release_html}
+  </section>
+
+  {offer_block() if show_filters else ""}
   {controls}
-
-{sr_heading}  <div class="grid">{cards}</div>
-
-  <p class="past" data-past hidden>
-    <span data-past-label>Прошедшие события скрыты.</span>
-    <button class="chip" data-past-toggle aria-pressed="false"></button>
-  </p>
-
-  <p class="empty">По этим фильтрам на выходные ничего нет.
-    <button class="chip" data-reset>Сбросить фильтры</button>
-  </p>
+  {weekend_notice}
+  {catalog_block}
   </main>
 
   {footer_html(articles_link=bool(ARTICLES))}
@@ -860,11 +987,11 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
 
 
 def header_html() -> str:
-    """Шапка: знак, название, город и дата выходных.
-
-    Знак — пилон четвёртого моста, он же буква «Н»: узнаётся в 16 px и
-    повторяется в иконке сайта, превью ссылок и карточках на главной.
-    """
+    """Шапка: знак, название, разделы и дата выходных."""
+    picks = "".join(
+        f'<a href="/{slug}/">{esc(label)}</a>'
+        for key, label, slug, *_ in FILTERS
+    )
     return (
         '<a class="brand" href="/">'
         '<img class="brand__mark" src="/mark.svg" alt="" width="30" height="30">'
@@ -872,7 +999,13 @@ def header_html() -> str:
         '<span class="brand__name">Планы на выходные</span>'
         '<span class="brand__city">Новосибирск</span>'
         "</span></a>"
+        '<nav class="top__nav" aria-label="Разделы">'
+        '<a href="/#catalog">Афиша</a>'
+        '<details class="nav-drop"><summary>Подборки</summary>'
+        f'<div class="nav-drop__menu">{picks}</div></details>'
+        '<a href="/statyi/">Статьи</a>'
         f'<span class="weekend">{esc(weekend_label())}</span>'
+        "</nav>"
     )
 
 
@@ -883,6 +1016,9 @@ def weekend_label() -> str:
     return f"{sat.day} {MONTHS[sat.month - 1]} – {sun.day} {MONTHS[sun.month - 1]}"
 
 
+NOW_OVERRIDE: datetime | None = None
+
+
 def now_nsk() -> datetime:
     """Текущее время в Новосибирске.
 
@@ -890,6 +1026,8 @@ def now_nsk() -> datetime:
     упасть; тогда берём фиксированный сдвиг UTC+7 — летнего времени в
     Новосибирске нет с 2014 года, разница круглый год одна.
     """
+    if NOW_OVERRIDE is not None:
+        return NOW_OVERRIDE
     try:
         from zoneinfo import ZoneInfo
         return datetime.now(ZoneInfo("Asia/Novosibirsk")).replace(tzinfo=None)
@@ -1008,6 +1146,7 @@ def article_page_html(article, events: list[dict], others: list) -> str:
 <html lang="ru">
 <head>
 <meta charset="utf-8">
+<script>document.documentElement.classList.add('js');setTimeout(function(){{if(!window.__revealReady)document.documentElement.classList.add('reveal-off')}},3000)</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{esc(article.title)}</title>
 <meta name="description" content="{esc(article.description)}">
@@ -1022,14 +1161,16 @@ def article_page_html(article, events: list[dict], others: list) -> str:
 <meta property="og:image:height" content="630">
 <meta property="og:locale" content="ru_RU">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="theme-color" content="#FBFAF7">
+<meta name="theme-color" content="#0B0D0C">
 <link rel="stylesheet" href="/assets/style.css?v={BUILD_VERSION}">
 <link rel="icon" href="/mark.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <script type="application/ld+json">{article_json_ld(article)}</script>
 </head>
-<body>
+<body class="page page--article">
+<div class="grain" aria-hidden="true"></div>
+<div class="progress" aria-hidden="true"><span></span></div>
 <a class="skip-link" href="#content">Перейти к тексту</a>
 <div class="wrap">
   <header class="top">
@@ -1067,6 +1208,7 @@ def statyi_index_html(articles: list) -> str:
 <html lang="ru">
 <head>
 <meta charset="utf-8">
+<script>document.documentElement.classList.add('js');setTimeout(function(){{if(!window.__revealReady)document.documentElement.classList.add('reveal-off')}},3000)</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Статьи о том, как выбрать событие на выходные — Новосибирск</title>
 <meta name="description" content="Как выбрать событие на выходные в Новосибирске: разборы форматов, советы по возрасту, цене и дороге.">
@@ -1076,13 +1218,15 @@ def statyi_index_html(articles: list) -> str:
 <meta property="og:title" content="Статьи — {esc(SITE_NAME)}">
 <meta property="og:url" content="{SITE_URL}/statyi/">
 <meta property="og:image" content="{SITE_URL}/og.png">
-<meta name="theme-color" content="#FBFAF7">
+<meta name="theme-color" content="#0B0D0C">
 <link rel="stylesheet" href="/assets/style.css?v={BUILD_VERSION}">
 <link rel="icon" href="/mark.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
 </head>
-<body>
+<body class="page page--article">
+<div class="grain" aria-hidden="true"></div>
+<div class="progress" aria-hidden="true"><span></span></div>
 <a class="skip-link" href="#content">Перейти к статьям</a>
 <div class="wrap">
   <header class="top">
@@ -1092,7 +1236,7 @@ def statyi_index_html(articles: list) -> str:
   <nav class="crumbs"><a href="/">Главная</a> · Статьи</nav>
 
   <main id="content">
-  <h1>Статьи</h1>
+  <h1 class="page-title">Статьи</h1>
   <p class="lead">Как выбрать событие, а не листать двадцать вкладок.</p>
   <ul class="statyi">{items}</ul>
   </main>
@@ -1284,8 +1428,24 @@ def build(rows: list[dict], out: Path, today: date, base: str = "",
 
 
 CSS = """
-/* Шрифт лежит рядом с сайтом: без внешних запросов страница одинаково
-   выглядит и открывается быстрее — важно для мобильных на слабом сигнале. */
+/* «Ночная афиша» — тёмный зал, тёплый свет проектора, костяная типографика.
+   Одна идентичность без переключения схемы: сайт должен узнаваться снимком
+   экрана, а не подстраиваться под систему. */
+
+@font-face{font-family:"Cormorant Garamond";font-style:normal;font-weight:300 600;font-display:swap;
+  src:url("fonts/cormorant-cyrillic.woff2") format("woff2");
+  unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+@font-face{font-family:"Cormorant Garamond";font-style:normal;font-weight:300 600;font-display:swap;
+  src:url("fonts/cormorant-latin.woff2") format("woff2");
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,
+  U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"Cormorant Garamond";font-style:italic;font-weight:300 600;font-display:swap;
+  src:url("fonts/cormorant-italic-cyrillic.woff2") format("woff2");
+  unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+@font-face{font-family:"Cormorant Garamond";font-style:italic;font-weight:300 600;font-display:swap;
+  src:url("fonts/cormorant-italic-latin.woff2") format("woff2");
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,
+  U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
 @font-face{font-family:"Golos Text";font-style:normal;font-weight:400 900;font-display:swap;
   src:url("fonts/golos-text-cyrillic.woff2") format("woff2");
   unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
@@ -1293,213 +1453,415 @@ CSS = """
   src:url("fonts/golos-text-latin.woff2") format("woff2");
   unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,
   U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
-:root{--bg:#FBFAF7;--ink:#14110F;--muted:#6B625A;--accent:#1F5E4B;--chip:#E8E2D6;--line:#E3DDD1;
-  --media-bg:#F1EEE7;
-  --font-display:"Golos Text",-apple-system,"Segoe UI",Roboto,sans-serif}
-@media (prefers-color-scheme:dark){:root{--bg:#14110F;--ink:#F3EFE7;--muted:#A79E93;--accent:#7FC7A8;
-  --chip:#242019;--line:#2E2822;--media-bg:#1F1B15}}
+
+:root{
+  color-scheme:dark;
+  --night:#0B0D0C;--night-2:#101312;--night-3:#161917;
+  --bone:#EDE6D8;--bone-2:#D8CFBF;--dim:#A79E90;--muted:#8C8478;
+  --brass:#C9A15F;--brass-hi:#E6C58C;
+  --line:rgba(237,230,216,.14);--line-2:rgba(237,230,216,.28);
+  --media:#131615;
+  --shell:1400px;--pad:clamp(18px,4vw,48px);
+  --ease:cubic-bezier(.16,1,.3,1);
+  --serif:"Cormorant Garamond",Georgia,"Times New Roman",serif;
+  --sans:"Golos Text",-apple-system,"Segoe UI",Roboto,sans-serif}
+
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,"Segoe UI",Roboto,sans-serif}
-h1,h2,h3,.brand__name,.card__title{font-family:var(--font-display)}
-.skip-link{position:absolute;left:-9999px;top:0;z-index:100;background:var(--accent);color:#fff;
-  padding:10px 18px;border-radius:0 0 10px 0;font-size:14px;font-weight:600;text-decoration:none}
-.skip-link:focus{left:0}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{margin:0;background:
+    radial-gradient(1100px 700px at 88% -8%,rgba(201,161,95,.07),transparent 62%),
+    var(--night);
+  color:var(--bone);font:400 17px/1.6 var(--sans);-webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility}
+h1,h2,h3,.brand__name,.card__title,.footer__mark,.stat__num,.hero__title{
+  font-family:var(--serif);font-weight:400;letter-spacing:-.01em}
+a{color:var(--brass-hi)}
+img{max-width:100%}
+::selection{background:var(--brass);color:var(--night)}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
   clip:rect(0 0 0 0);white-space:nowrap;border:0}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.chip:focus-visible,a.chip:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
-.wrap{max-width:1120px;margin:0 auto;padding:24px 20px 64px}
-header.top{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
-  border-bottom:1px solid var(--line);padding-bottom:16px}
-.brand{display:inline-flex;align-items:center;gap:11px;text-decoration:none;color:var(--ink)}
+[hidden]{display:none !important}
+:focus-visible{outline:1px solid var(--brass-hi);outline-offset:4px}
+/* Светлая кнопка на светлом фоне: латунное кольцо на кости почти не видно. */
+.btn:focus-visible{outline:2px solid var(--night);outline-offset:3px}
+.btn--ghost:focus-visible{outline-color:var(--brass-hi)}
+:focus:not(:focus-visible){outline:none}
+.skip-link{position:absolute;left:-9999px;top:0;z-index:200;background:var(--bone);color:var(--night);
+  padding:12px 20px;font:600 14px/1 var(--sans);text-decoration:none}
+.skip-link:focus{left:0}
+
+/* Плёнка: зерно поверх всего кадра, но ниже интерфейсных слоёв. */
+.grain{position:fixed;inset:-40%;z-index:90;pointer-events:none;opacity:.055;
+  mix-blend-mode:overlay;background-repeat:repeat;background-size:160px 160px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E");
+  animation:grainShift 7s steps(6) infinite}
+@keyframes grainShift{
+  0%{transform:translate3d(0,0,0)}20%{transform:translate3d(-2%,1%,0)}
+  40%{transform:translate3d(1%,-2%,0)}60%{transform:translate3d(-1%,2%,0)}
+  80%{transform:translate3d(2%,1%,0)}100%{transform:translate3d(0,0,0)}}
+.progress{position:fixed;inset:0 0 auto 0;height:1px;z-index:120;background:transparent}
+.progress span{display:block;height:100%;background:linear-gradient(90deg,var(--brass),var(--brass-hi));
+  transform:scaleX(0);transform-origin:0 50%}
+
+.wrap{position:relative;max-width:var(--shell);margin:0 auto;padding:0 var(--pad)}
+
+/* ---------------------------------------------------------------- шапка */
+header.top{display:flex;justify-content:space-between;align-items:center;gap:24px;
+  padding:20px 0 18px;border-bottom:1px solid var(--line);position:relative;z-index:20}
+.brand{display:inline-flex;align-items:center;gap:13px;text-decoration:none;color:var(--bone)}
 .brand__mark{display:block;width:30px;height:30px;border-radius:7px}
-.brand__text{display:flex;flex-direction:column;gap:3px}
-.brand__name{font-size:16px;font-weight:600;letter-spacing:-.005em;line-height:1}
-.brand__city{font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;
-  color:var(--muted);line-height:1}
-.weekend{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
-h1{font-size:28px;line-height:1.2;margin:28px 0 6px}
-h2{font-size:20px;margin:32px 0 12px}
-.lead{color:var(--muted);margin:0 0 22px;max-width:62ch}
-.release{color:var(--muted);font-size:13px;margin:-14px 0 18px}
-.release time{font-variant-numeric:tabular-nums}
-.controls{position:sticky;top:0;background:var(--bg);padding:12px 0;z-index:5;
-  display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)}
+.brand__text{display:flex;flex-direction:column;gap:4px}
+.brand__name{font-size:19px;font-weight:500;line-height:1;letter-spacing:0}
+.brand__city{font:600 9.5px/1 var(--sans);letter-spacing:.24em;text-transform:uppercase;color:var(--muted)}
+.top__nav{display:flex;align-items:center;gap:clamp(16px,3vw,34px)}
+.top__nav a{font:500 13px/1 var(--sans);letter-spacing:.02em;color:var(--bone-2);text-decoration:none;
+  border-bottom:1px solid transparent;padding-bottom:4px;transition:color .35s var(--ease),border-color .35s}
+.top__nav a:hover{color:var(--bone);border-color:var(--brass)}
+.weekend{font:500 11px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--dim);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.nav-drop{position:relative}
+.nav-drop summary{list-style:none;cursor:pointer;font:500 13px/1 var(--sans);color:var(--bone-2);
+  padding-bottom:4px;border-bottom:1px solid transparent;
+  transition:color .3s var(--ease),border-color .3s var(--ease)}
+.nav-drop summary::-webkit-details-marker{display:none}
+.nav-drop summary::after{content:"";display:inline-block;width:5px;height:5px;margin-left:7px;
+  border-right:1px solid currentColor;border-bottom:1px solid currentColor;
+  transform:rotate(45deg) translateY(-1px)}
+.nav-drop[open] summary::after{transform:rotate(-135deg) translateY(-1px)}
+.nav-drop summary:hover{color:var(--bone);border-color:var(--brass)}
+.nav-drop__menu{position:absolute;top:calc(100% + 14px);left:0;z-index:60;min-width:230px;
+  display:flex;flex-direction:column;padding:8px;background:#121514;border:1px solid var(--line-2)}
+.nav-drop__menu a{padding:10px;font:500 13px/1.2 var(--sans);color:var(--bone-2);border:0}
+.nav-drop__menu a:hover{background:rgba(237,230,216,.06);color:var(--bone)}
+
+/* ---------------------------------------------------------------- герой */
+.hero{position:relative;isolation:isolate;display:flex;flex-direction:column;justify-content:flex-end;
+  min-height:min(86vh,800px);min-height:min(86svh,800px);width:100vw;margin-inline:calc(50% - 50vw);
+  padding:clamp(44px,7vw,84px) var(--pad) clamp(26px,4vw,44px);overflow:hidden}
+.hero__media{position:absolute;inset:0;z-index:-3;overflow:hidden;background:var(--night-2)}
+.hero__img{width:100%;height:100%;object-fit:cover;object-position:58% 50%;
+  transform:scale(1.04);filter:brightness(.62) saturate(.72) contrast(1.04);
+  animation:drift 36s var(--ease) infinite alternate}
+@keyframes drift{from{transform:scale(1.04) translate3d(0,0,0)}
+  to{transform:scale(1.11) translate3d(-1.2%,-1.4%,0)}}
+.hero__veil{position:absolute;inset:0;z-index:-2;background:
+  linear-gradient(to top,var(--night) 0%,rgba(11,13,12,.9) 12%,rgba(11,13,12,.34) 52%,rgba(11,13,12,.1) 100%),
+  linear-gradient(to right,rgba(11,13,12,.86) 0%,rgba(11,13,12,.28) 58%,rgba(11,13,12,.02) 100%),
+  radial-gradient(900px 520px at 82% 6%,rgba(201,161,95,.16),transparent 62%)}
+.hero__glow{position:absolute;inset:0;z-index:-1;opacity:0;transition:opacity .8s var(--ease);
+  background:radial-gradient(560px circle at var(--mx,70%) var(--my,30%),
+    rgba(230,197,140,.16),transparent 62%)}
+.hero:hover .hero__glow{opacity:1}
+.hero__caption{position:absolute;right:var(--pad);top:clamp(44px,7vw,84px);margin:0;
+  font:500 10px/1.5 var(--sans);letter-spacing:.2em;text-transform:uppercase;color:rgba(237,230,216,.55);
+  text-align:right;z-index:2}
+.hero__inner,.hero__stats,.hero__credit{position:relative;z-index:2}
+.hero__inner{max-width:1040px}
+.eyebrow{display:flex;align-items:center;flex-wrap:wrap;gap:12px 16px;margin:0;
+  font:600 10.5px/1 var(--sans);letter-spacing:.22em;text-transform:uppercase;color:var(--brass)}
+.eyebrow span{display:inline-flex;align-items:center;gap:16px}
+.eyebrow span+span::before{content:"";width:22px;height:1px;background:rgba(201,161,95,.5)}
+.hero__title{margin:clamp(18px,2.6vw,30px) 0 0;font-size:clamp(46px,8.4vw,122px);line-height:.92;
+  letter-spacing:-.022em;text-wrap:balance}
+.hero__title span{display:block;overflow:hidden;padding-bottom:.04em}
+.hero__title i{display:block;font-style:normal}
+.hero__title em{font-style:normal;color:var(--bone)}
+.hero__lead{max-width:45ch;margin:clamp(16px,2.2vw,24px) 0 0;color:var(--bone-2);
+  font-size:clamp(15.5px,1.35vw,19px);line-height:1.58}
+.hero__actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:clamp(24px,3.6vw,38px)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:12px;min-height:52px;
+  padding:0 26px;border:1px solid transparent;border-radius:0;
+  font:600 15px/1 var(--sans);letter-spacing:0;text-decoration:none;
+  color:var(--night);background:var(--bone);
+  transition:background .45s var(--ease),color .45s var(--ease),border-color .45s var(--ease)}
+.btn:hover{background:var(--brass-hi)}
+.btn__arrow{transition:transform .45s var(--ease)}
+.btn:hover .btn__arrow{transform:translateX(5px)}
+.btn--ghost{background:transparent;color:var(--bone);border-color:var(--line-2)}
+.btn--ghost:hover{background:transparent;border-color:var(--bone);color:var(--bone)}
+.hero__stats{display:flex;flex-wrap:wrap;gap:clamp(22px,4.4vw,64px);margin:clamp(34px,5.5vw,60px) 0 0;
+  padding-top:20px;border-top:1px solid var(--line)}
+.hero__stats div{display:flex;flex-direction:column-reverse;gap:6px}
+.hero__stats dt{font:500 10px/1 var(--sans);letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+.stat__num{font-size:clamp(30px,3.4vw,46px);line-height:1;color:var(--bone);font-variant-numeric:lining-nums}
+.release{margin:16px 0 0;font:500 10.5px/1.6 var(--sans);letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted)}
+.release time{font-variant-numeric:tabular-nums;color:var(--dim)}
+.hero--masthead{min-height:0;padding-top:clamp(44px,6vw,72px);padding-bottom:clamp(32px,5vw,56px);
+  border-bottom:1px solid var(--line)}
+.hero--masthead .hero__title{font-size:clamp(36px,5vw,64px)}
+.hero--masthead .hero__stats{margin-top:clamp(26px,4vw,40px)}
+
+/* ---------------------------------------------------------------- фильтры */
+.controls{position:sticky;top:0;z-index:40;display:flex;flex-direction:column;gap:10px;
+  margin-inline:calc(-1 * var(--pad));padding:13px var(--pad);
+  background:rgba(11,13,12,.96);
+  -webkit-backdrop-filter:blur(18px) saturate(130%);
+  backdrop-filter:blur(18px) saturate(130%);
+  border-bottom:1px solid var(--line);scroll-margin-top:80px}
 .controls__row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.chip{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
-  padding:7px 14px;font-size:14px;cursor:pointer;font-family:inherit}
-a.chip{display:inline-flex;align-items:center;text-decoration:none}
-.chip[aria-pressed="true"],.chip[aria-current="page"]{background:var(--accent);border-color:var(--accent);color:#fff}
-/* Дубль «Бесплатно» в верхней строке: до воскресенья он не нужен и скрыт. */
+.chip{display:inline-flex;align-items:center;border:1px solid var(--line-2);background:transparent;
+  color:var(--bone-2);border-radius:2px;padding:9px 14px;font:500 12.5px/1 var(--sans);
+  letter-spacing:.01em;cursor:pointer;font-family:inherit;text-decoration:none;
+  transition:color .3s var(--ease),border-color .3s var(--ease),background .3s var(--ease)}
+.chip:hover{color:var(--bone);border-color:var(--bone)}
+a.chip:hover{text-decoration:none}
+.chip[aria-pressed="true"],.chip[aria-current]{
+  background:transparent;border-color:var(--brass);color:var(--bone)}
 .chip.chip--top{display:none}
-select{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
-  padding:7px 12px;font-size:14px;font-family:inherit}
-/* Место может быть не одно: районы и населённые пункты выбираются чекбоксами. */
+select{border:1px solid var(--line-2);background:transparent;color:var(--bone-2);border-radius:2px;
+  padding:9px 14px;font:500 12.5px/1 var(--sans);font-family:inherit}
 .picker{position:relative}
-.picker__btn{display:inline-flex;align-items:center;gap:6px}
+.picker__btn{display:inline-flex;align-items:center;gap:8px}
 .picker__btn::-webkit-details-marker{display:none}
-.picker__btn::after{content:"";width:6px;height:6px;margin-left:2px;
-  border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;
-  transform:rotate(45deg) translateY(-1px);opacity:.6}
+.picker__btn::after{content:"";width:5px;height:5px;margin-left:2px;
+  border-right:1px solid currentColor;border-bottom:1px solid currentColor;
+  transform:rotate(45deg) translateY(-1px);opacity:.7;transition:transform .3s var(--ease)}
 .picker[open] .picker__btn::after{transform:rotate(-135deg) translateY(-1px)}
-.picker.is-set .picker__btn{border-color:var(--accent);color:var(--accent)}
-.picker__menu{position:absolute;top:calc(100% + 6px);left:0;z-index:20;min-width:240px;
-  max-width:min(320px,calc(100vw - 32px));max-height:min(60vh,360px);overflow:auto;
-  background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:6px;
-  box-shadow:0 12px 28px rgba(23,23,21,.14)}
-.picker__item{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:8px;
-  font-size:14px;cursor:pointer}
-.picker__item:hover{background:rgba(23,23,21,.05)}
-.picker__item input{width:16px;height:16px;accent-color:var(--accent);flex:0 0 auto}
-.picker__reset{margin:4px;font-size:13px}
-/* На телефоне список раскрывается внутри шторки: абсолютное меню вылезало за экран. */
+.picker.is-set .picker__btn{border-color:var(--brass);color:var(--brass-hi)}
+.picker__menu{position:absolute;top:calc(100% + 8px);left:0;z-index:20;min-width:250px;
+  max-width:min(330px,calc(100vw - 32px));max-height:min(60vh,380px);overflow:auto;
+  background:#121514;border:1px solid var(--line-2);border-radius:2px;padding:6px;
+  box-shadow:0 30px 60px -20px rgba(0,0,0,.8)}
+.picker__item{display:flex;align-items:center;gap:10px;padding:10px;font-size:13.5px;color:var(--bone-2);
+  cursor:pointer;transition:background .25s}
+.picker__item:hover{background:rgba(237,230,216,.06);color:var(--bone)}
+.picker__item input{width:15px;height:15px;accent-color:var(--brass);flex:0 0 auto}
+.picker__reset{margin:4px;font-size:12px}
 @media (max-width:640px){
   .picker[open]{flex:1 0 100%}
-  .picker__menu{position:static;margin-top:8px;width:100%;max-width:none;
-    box-shadow:none;max-height:50vh}
-}
-.count{margin-left:auto;color:var(--muted);font-size:14px}
-/* Шторка фильтров. На широком экране все фильтры видны, поэтому кнопки нет;
-   на телефоне она прячет лишние строки и оставляет дни, счётчик и себя. */
-.filters-toggle{display:none;align-items:center;justify-content:center;gap:6px;
-  border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;
-  padding:0 14px 0 12px;width:auto;min-width:44px;height:44px;font-family:inherit;cursor:pointer}
-.filters-toggle__label{font-size:14px;font-weight:600;line-height:1}
-/* Стрелка вниз подсказывает, что кнопка раскрывает строку фильтров.
-   В открытом состоянии поворачивается вверх. */
-.filters-toggle__chevron{flex:0 0 auto;transition:transform .18s ease}
-.filters-toggle[aria-expanded="true"]{border-color:var(--accent);color:var(--accent)}
+  .picker__menu{position:static;margin-top:8px;width:100%;max-width:none;box-shadow:none;
+    max-height:50vh;background:transparent;border-color:var(--line)}}
+.count{margin-left:auto;font:500 12px/1 var(--sans);letter-spacing:.01em;
+  color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums}
+.filters-toggle{display:none;align-items:center;justify-content:center;gap:7px;
+  border:1px solid var(--line-2);background:transparent;color:var(--bone-2);border-radius:2px;
+  padding:0 14px 0 12px;width:auto;min-width:44px;height:42px;font-family:inherit;cursor:pointer}
+.filters-toggle__label{font:500 12.5px/1 var(--sans)}
+.filters-toggle__chevron{flex:0 0 auto;transition:transform .3s var(--ease)}
+.filters-toggle[aria-expanded="true"]{border-color:var(--brass);color:var(--brass-hi)}
 .filters-toggle[aria-expanded="true"] .filters-toggle__chevron{transform:rotate(180deg)}
-@media (prefers-reduced-motion: reduce){
-  .filters-toggle__chevron{transition:none}
-}
-/* На самых узких экранах подпись отдаём: с ней кнопка уезжает на отдельную
-   строку, а иконка со стрелкой всё равно читается как «раскрыть». */
 @media (max-width:345px){
   .filters-toggle{padding:0 9px;gap:1px}
-  .filters-toggle__label{display:none}
-}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:22px;margin-top:26px}
-@keyframes gridFlash{from{opacity:.3}to{opacity:1}}
-.grid--flash{animation:gridFlash .3s ease-out}
-@media (prefers-reduced-motion: reduce){.grid--flash{animation:none}}
-/* атрибут hidden должен побеждать display:flex у .card, иначе фильтры не скрывают карточки */
-[hidden]{display:none !important}
-.card{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg)}
-/* Единый кадр 4:3: афиши приходят от организаторов разного размера, и без
-   общей рамки сетка выглядит рваной. Картинка не обрезается (contain):
-   на постерах бывает текст, который нельзя отрезать. */
-.card__media{position:relative;display:block;background:var(--media-bg);aspect-ratio:4/3}
-/* Картинка вынута из потока: иначе её собственная высота растягивала кадр
-   и соотношение 4:3 не соблюдалось. */
-.card__media img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center}
-.card__body{padding:14px 16px 18px;display:flex;flex-direction:column;gap:8px;flex:1}
-.card__meta{display:flex;flex-direction:column;gap:5px;margin:0}
-.card__meta-row{display:flex;align-items:flex-start;gap:6px;font-size:13px;font-weight:600;
-  color:var(--accent);line-height:1.35}
-.card__meta-row--muted{color:var(--muted);font-weight:500}
-.card__icon{flex:0 0 auto;margin-top:1px}
-.card__title{margin:0;font-size:18px;line-height:1.28;letter-spacing:-.005em}
-.card__text{margin:0;font-size:15px;color:var(--muted);flex:1}
-.card__price{margin:0;font-size:14px;font-weight:600}
-/* Ссылка — цель для пальца: не меньше 44 px по высоте, иначе на телефоне
-   в неё сложно попасть. */
-.card__link{display:inline-flex;align-items:center;gap:6px;min-height:44px;
-  font-size:14px;color:var(--accent);text-decoration:none}
-.card__link:hover{text-decoration:underline}
-.card__report{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;margin-top:2px}
-.card__report:hover{text-decoration:underline}
-/* прошедшее событие: видно, что оно было, но не путается с актуальным */
-.card--past{opacity:.55}
+  .filters-toggle__label{display:none}}
+
+/* ---------------------------------------------------------------- каталог */
+.catalog{padding-top:clamp(38px,6vw,76px)}
+.catalog-head{display:flex;justify-content:space-between;align-items:flex-end;gap:28px;flex-wrap:wrap}
+.catalog-head h2{margin:0;font-size:clamp(30px,3.6vw,50px);line-height:1}
+.catalog-head p{margin:0 0 6px;max-width:44ch;color:var(--dim);font-size:13.5px;line-height:1.6}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(286px,1fr));
+  gap:clamp(26px,3vw,40px) clamp(18px,2.2vw,28px);margin-top:clamp(26px,3.4vw,40px)}
+.card{display:flex;flex-direction:column;background:transparent;border:0;border-radius:0;overflow:visible}
+.card__media{position:relative;display:block;aspect-ratio:4/3;border:1px solid var(--line);
+  background:#121514;overflow:hidden;transition:border-color .5s var(--ease)}
+.card__media::after{content:"";position:absolute;inset:10px;z-index:1;pointer-events:none;
+  background:linear-gradient(to top,rgba(11,13,12,.42),transparent 46%);opacity:0;
+  transition:opacity .6s var(--ease)}
+.card__media img{position:absolute;inset:10px;width:calc(100% - 20px);height:calc(100% - 20px);
+  object-fit:contain;object-position:center;opacity:1;
+  transition:opacity .5s var(--ease)}
+.card:hover .card__media{border-color:var(--line-2)}
+.card:hover .card__media::after{opacity:1}
+.card__body{display:flex;flex-direction:column;gap:8px;flex:1;padding:16px 2px 0}
+.card__meta{margin:0;font:500 12px/1.45 var(--sans);color:var(--dim)}
+.card__title{margin:0;font-family:var(--sans);font-size:20px;line-height:1.32;font-weight:600;
+  letter-spacing:-.01em;color:var(--bone);transition:color .35s var(--ease)}
+.card:hover .card__title{color:var(--brass-hi)}
+.card__text{margin:0;font-size:14px;line-height:1.6;color:var(--dim);flex:1;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.card__price{margin:0;font:500 13px/1.4 var(--sans);color:var(--bone-2)}
+.card__link{display:inline-flex;align-items:center;gap:8px;min-height:44px;width:max-content;
+  font:600 13px/1 var(--sans);letter-spacing:0;color:var(--brass);
+  text-decoration:none;border-bottom:1px solid transparent;padding-bottom:3px;
+  transition:color .35s var(--ease),border-color .35s var(--ease)}
+.card__link:hover{color:var(--brass-hi);border-color:var(--brass-hi);text-decoration:none}
+.card--past{opacity:.45;filter:grayscale(.5)}
 .card--past .card__meta::after{content:" · уже прошло";color:var(--muted)}
-.past{margin:20px 0 0;font-size:14px;color:var(--muted)}
-.past .chip{margin-left:8px;font-size:13px;padding:5px 12px}
-.empty{display:none;padding:40px 0;color:var(--muted)}
-footer{margin-top:32px;color:var(--muted);font-size:13px}
-@media (max-width:640px){.grid{grid-template-columns:1fr}h1{font-size:24px}
-  /* На телефоне ссылка выглядит кнопкой во всю ширину: видно, что она
-     нажимается, и промахнуться сложнее. */
-  .card__link{justify-content:center;width:100%;min-height:48px;margin-top:2px;
-    border:1px solid var(--accent);border-radius:999px;font-size:15px;font-weight:600}
-  /* Два списка мест на телефоне делят одну строку: по отдельности они
-     растягивали фильтры на лишнюю сотню пикселей. */
-  .controls__row select{flex:1 1 auto;min-width:0;min-height:44px}
-  /* Шторка: в свёрнутом виде одна строка — дни, счётчик, кнопка. Если фильтры
-     включены, под ней остаются только они и «Сбросить», чтобы было видно,
-     почему выдача короткая. */
+.past{margin:28px 0 0;font-size:13px;color:var(--dim)}
+.past .chip{margin-left:10px;font-size:11.5px;padding:6px 13px}
+.lead{margin:0;max-width:54ch;color:var(--dim);font-size:16px;line-height:1.6}
+.page-title{margin:clamp(36px,5vw,64px) 0 12px;font-size:clamp(42px,6.4vw,88px);
+  line-height:.95;letter-spacing:-.02em}
+.empty{display:none;padding:64px 0;color:var(--dim);font-family:var(--serif);font-size:24px}
+.empty .chip{font-family:var(--sans);font-size:12px;margin-left:10px}
+
+/* ---------------------------------------------------------------- приглашение */
+.offer{display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;
+  padding:26px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.offer__text{flex:1 1 340px;min-width:0}
+.offer h2{margin:0;font-size:clamp(24px,2.4vw,32px);line-height:1.1}
+.offer p{margin:6px 0 0;font-size:13px;color:var(--dim)}
+.offer a{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:0 22px;
+  border:1px solid var(--line-2);border-radius:0;color:var(--bone);background:transparent;
+  font:600 15px/1 var(--sans);letter-spacing:0;text-decoration:none;
+  white-space:nowrap;transition:border-color .4s var(--ease),background .4s var(--ease),color .4s}
+.offer a:hover{border-color:var(--brass);background:var(--brass);color:var(--night)}
+
+/* Выходные закончились: объясняем, почему в сетке прошедшее. */
+.weekend-over{margin-top:clamp(24px,4vw,40px);padding:20px 24px;border:1px solid var(--brass);
+  background:rgba(201,161,95,.05)}
+.weekend-over p{margin:0;color:var(--dim);font-size:14px;line-height:1.6}
+.weekend-over__title{margin-bottom:4px !important;font-family:var(--serif);font-size:28px;
+  line-height:1.1;color:var(--bone)}
+
+/* ---------------------------------------------------------------- подвал */
+footer{margin-top:clamp(56px,8vw,110px);border-top:1px solid var(--line);
+  padding:clamp(36px,5vw,64px) 0 56px;color:var(--muted);font-size:12px;line-height:1.75}
+.footer__mark{margin:0 0 clamp(20px,3vw,32px);font-size:clamp(38px,6vw,78px);line-height:.92;
+  color:var(--bone);letter-spacing:-.02em}
+.footer__mark em{font-style:italic;color:var(--brass-hi)}
+.footer__cols{display:flex;justify-content:space-between;align-items:flex-start;gap:36px;
+  padding-top:22px;border-top:1px solid var(--line)}
+.footer__legal{max-width:72ch;margin:0}
+.footer__legal a{color:var(--bone-2);text-decoration:none;border-bottom:1px solid var(--line-2)}
+.footer__legal a:hover{color:var(--bone);border-color:var(--bone)}
+.footer__nav{display:flex;flex-direction:column;gap:8px;flex:0 0 auto;align-items:flex-end}
+.footer__nav a{color:var(--bone-2);text-decoration:none;font:500 11px/1 var(--sans);
+  letter-spacing:.12em;text-transform:uppercase}
+.footer__nav a:hover{color:var(--brass-hi)}
+.footer__fine{margin:26px 0 0;font:500 9.5px/1.6 var(--sans);letter-spacing:.14em;
+  text-transform:uppercase;color:rgba(140,132,120,.7)}
+
+/* ---------------------------------------------------------------- статьи */
+.crumbs{margin:26px 0 0;font:500 10.5px/1.5 var(--sans);letter-spacing:.12em;text-transform:uppercase;
+  color:var(--muted)}
+.crumbs a{color:var(--dim);text-decoration:none}
+.crumbs a:hover{color:var(--brass-hi)}
+.article{max-width:66ch;margin:clamp(36px,5vw,64px) auto 0}
+.article h1{font-size:clamp(38px,5.6vw,68px);line-height:.98;margin:0 0 20px;text-wrap:balance}
+.article__meta{margin:0 0 34px;font:500 10.5px/1.5 var(--sans);letter-spacing:.14em;
+  text-transform:uppercase;color:var(--muted)}
+.article p{font-size:clamp(17px,1.5vw,19.5px);line-height:1.72;margin:0 0 18px;color:var(--bone-2)}
+.article h2{font-size:clamp(26px,3vw,36px);line-height:1.1;margin:44px 0 14px;color:var(--bone)}
+.article h3{font-size:21px;margin:32px 0 10px;color:var(--bone)}
+.article ul,.article ol{margin:0 0 20px;padding-left:24px;font-size:clamp(17px,1.5vw,19.5px);
+  line-height:1.72;color:var(--bone-2)}
+.article li{margin:0 0 10px}
+.article li::marker{color:var(--brass)}
+.article a{color:var(--brass-hi);text-decoration-color:rgba(230,197,140,.4);text-underline-offset:3px}
+.article__live{margin:42px 0 10px;padding:26px 28px;border:1px solid var(--line);
+  background:linear-gradient(160deg,#151917,#0E1110)}
+.article__live h2{font-size:24px;margin:0 0 14px}
+.article__live ul{margin:0 0 12px;font-size:15px;line-height:1.55}
+.article__live a{font-weight:600}
+.article__related{margin:44px 0 0;padding-top:24px;border-top:1px solid var(--line)}
+.article__related h2{font-size:22px;margin:0 0 12px}
+.article__related ul{list-style:none;padding:0;font-size:16px}
+.article__related a{text-decoration:none}
+.statyi{list-style:none;padding:0;margin:clamp(30px,4vw,48px) 0 0;max-width:72ch;counter-reset:st}
+.statyi li{counter-increment:st;padding:26px 0;border-bottom:1px solid var(--line)}
+.statyi li::before{content:counter(st,decimal-leading-zero);display:block;margin-bottom:10px;
+  font:500 10px/1 var(--sans);letter-spacing:.2em;color:var(--brass)}
+.statyi a{font-family:var(--serif);font-size:clamp(24px,3vw,34px);line-height:1.1;font-weight:500;
+  color:var(--bone);text-decoration:none}
+.statyi a:hover{color:var(--brass-hi)}
+.statyi p{margin:8px 0 0;font-size:14px;color:var(--dim)}
+.page--article .hero{display:none}
+
+/* ---------------------------------------------------------------- адаптив */
+@media (max-width:1000px){
+  .hero{min-height:min(84vh,720px);min-height:min(84svh,720px)}
+  .hero__caption{display:none}
+  .card__title{font-size:22px}}
+@media (max-width:900px){
+  .nav-drop,.top__nav > a[href="/#catalog"]{display:none}
+}
+@media (max-width:760px){
+  body{font-size:16px}
+  /* Зерно с blend-режимом и анимацией на телефоне дороже, чем красивее. */
+  .grain{mix-blend-mode:normal;animation:none;opacity:.04}
+  .hero{min-height:min(84vh,680px);min-height:min(84svh,680px);padding-top:40px}
+  .hero--photo::after{inset:8px}
+  .hero__stats{gap:22px 30px;padding-top:16px}
+  .hero__stats div{flex:1 1 auto}
+  .catalog-head{gap:10px;align-items:flex-start;flex-direction:column}
+  .catalog-head p{margin:0}
+  .footer__cols{flex-direction:column;gap:20px}
+  .footer__nav{align-items:flex-start;flex-direction:row;gap:18px}
+  .article{padding:0}
+}
+@media (max-width:640px){
+  header.top{padding:14px 0 12px;gap:12px}
+  .brand__name{font-size:17px}
+  .top__nav{gap:14px}
+  .weekend{font-size:9.5px;letter-spacing:.1em}
+  .hero{min-height:min(82vh,620px);min-height:min(82svh,620px)}
+  .hero__title{font-size:clamp(40px,12.5vw,60px)}
+  .hero__lead{font-size:14.5px;line-height:1.5}
+  .hero__actions{gap:8px;margin-top:22px}
+  .btn{min-height:48px;padding:0 18px;font-size:11.5px;flex:1 1 auto}
+  .hero__stats{margin-top:26px;gap:18px}
+  .stat__num{font-size:30px}
+  .hero__stats dt{font-size:9px;letter-spacing:.14em}
+  /* Третья метка (дата) уходит на свою строку: на узком экране тире
+     от переноса оказывалось в начале строки. */
+  .eyebrow span:nth-child(3){flex-basis:100%}
+  .eyebrow span:nth-child(3)::before{display:none}
+  .controls{margin-inline:calc(-1 * var(--pad))}
+  .grid{grid-template-columns:1fr;gap:30px;margin-top:24px}
+  .card__media{aspect-ratio:4/3}
+  .card__title{font-size:23px}
+  .card__text{font-size:14px;-webkit-line-clamp:4}
+  .card__link{justify-content:center;width:100%;min-height:48px;margin-top:4px;
+    border:1px solid var(--line-2);border-radius:0;font-size:13px}
+  .card__link:hover{border-color:var(--brass)}
+  .offer{padding:20px 0;gap:14px}
+  .offer p{display:none}
+  .offer a{width:100%}
+  .controls__row--top{gap:6px}
+  .controls__row--top .chip{display:inline-flex;align-items:center;min-height:42px;padding:0 13px;
+    font-size:11.5px}
+  .count{font-size:11px;min-width:0;overflow:hidden;text-overflow:ellipsis}
   .filters-toggle{display:inline-flex}
-  /* В воскресенье «Субботы» в строке нет, и сразу за «Воскресеньем» встаёт
-     «Бесплатно»: до шторки не надо раскрывать, чтобы отобрать бесплатное. */
   .controls[data-sunday="true"] .chip.chip--top{display:inline-flex}
-  /* В воскресенье в строке на одну метку больше: ужимаем её и счётчик,
-     иначе счётчик уезжает за правый край на 360–390 px. */
   .controls[data-sunday="true"] .controls__row--top{gap:4px}
-  .controls[data-sunday="true"] .controls__row--top .chip{padding:0 10px;font-size:12px}
-  .controls[data-sunday="true"] .count{font-size:12px;min-width:0;white-space:nowrap;
-    overflow:hidden;text-overflow:ellipsis}
-  .controls__row--top{gap:5px}
-  /* Цель для пальца не меньше 44 px — как у остальных чипов и кнопки шторки. */
-  .controls__row--top .chip{display:inline-flex;align-items:center;min-height:44px;
-    padding:0 13px;font-size:13px}
-  .count{font-size:13px}
+  .controls[data-sunday="true"] .controls__row--top .chip{padding:0 10px;font-size:10.5px}
   .controls[data-open="false"] .controls__row--more{display:none}
   .controls[data-open="false"][data-active="true"] .controls__row--more{display:flex}
   .controls[data-open="false"] .controls__row--more > *{display:none}
-  .controls[data-open="false"] .controls__row--more > .chip[aria-current="page"],
+  .controls[data-open="false"] .controls__row--more > .chip[aria-current],
   .controls[data-open="false"] .controls__row--more > [data-reset]{display:inline-flex}
-  .controls[data-open="false"] .controls__row--more > select.is-set{display:inline-block}}
-/* Статьи: узкая колонка для чтения, живой блок событий и перелинковка */
-.crumbs{margin:18px 0 0;font-size:14px;color:var(--muted)}
-.crumbs a{color:var(--muted)}
-.article{max-width:70ch;margin-top:8px}
-.article h1{font-size:30px;line-height:1.2;margin:18px 0 8px}
-.article__meta{margin:0 0 18px;font-size:14px;color:var(--muted)}
-.article h2{font-size:22px;margin:30px 0 10px}
-.article h3{font-size:18px;margin:24px 0 8px}
-.article p{font-size:17px;line-height:1.6;margin:0 0 14px}
-.article ul,.article ol{margin:0 0 16px;padding-left:22px;font-size:17px;line-height:1.6}
-.article li{margin:0 0 8px}
-.article a{color:var(--accent)}
-.article__live{margin:32px 0 8px;padding:18px 20px;border:1px solid var(--line);border-radius:14px;background:var(--chip)}
-.article__live h2{font-size:18px;margin:0 0 10px}
-.article__live ul{margin:0 0 10px;font-size:15px;line-height:1.45}
-.article__live a{font-weight:600}
-.article__related{margin:32px 0 0;padding-top:18px;border-top:1px solid var(--line)}
-.article__related h2{font-size:18px;margin:0 0 10px}
-.article__related ul{list-style:none;padding:0;font-size:16px}
-.statyi{list-style:none;padding:0;margin:26px 0 0;max-width:70ch}
-.statyi li{padding:16px 0;border-bottom:1px solid var(--line)}
-.statyi a{font-size:19px;font-weight:600;color:var(--ink);text-decoration:none}.statyi a:hover{color:var(--accent)}
-.statyi p{margin:6px 0 0;font-size:15px;color:var(--muted)}
-/* Приглашение прислать событие: компактная строка под описанием выпуска.
-   В каталоге больше двухсот карточек, и блок в самом низу никто не увидит. */
-/* На широком экране приглашение стоит справа от заголовка: полоса под описанием
-   съедала высоту первого экрана, а каталог и без неё длинный. */
-.intro{display:grid;gap:18px}
-@media (min-width:1000px){
-  /* Первый вариант: текст слева как есть, карточка справа своей высоты,
-     низ выровнен по нижнему краю описания. */
-  .intro{grid-template-columns:minmax(0,1fr) 380px;align-items:end;gap:32px}
-  .intro .offer{margin:0;flex-direction:column;align-items:flex-start;gap:14px}
-  .intro .offer__text{flex:none}
-  .intro .offer a{width:100%}
+  .controls[data-open="false"] .controls__row--more > select.is-set{display:inline-block}
+  .controls__row select{flex:1 1 auto;min-width:0;min-height:42px}
+  .empty{font-size:21px;padding:48px 0}
 }
-.offer{display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin:18px 0 0;
-  padding:14px 20px;border:1px solid var(--line);border-radius:12px;background:var(--media-bg)}
-.offer__text{flex:1 1 300px;min-width:0}
-.offer h2{margin:0;font-size:17px;line-height:1.25}
-.offer p{margin:3px 0 0;font-size:14px;color:var(--muted)}
-.offer a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;
-  padding:0 20px;border-radius:999px;background:var(--accent);color:var(--bg);
-  font-size:15px;font-weight:600;text-decoration:none;white-space:nowrap}
-.offer a:hover{text-decoration:underline}
-@media (max-width:560px){
-  /* На телефоне блок стоит над списком: оставляем заголовок и кнопку,
-     пояснение убираем, иначе полоса занимает четверть экрана. */
-  .offer{padding:12px 14px;gap:10px}
-  .offer p{display:none}
-  .offer a{width:100%}
+@media (max-width:380px){
+  .brand__mark{width:26px;height:26px}
+  .brand__name{font-size:15.5px}
+  .top__nav .weekend{display:none}
 }
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;
+    transition-duration:.001ms !important}
+  .hero__img{transform:none}
+  .grain{animation:none}
+}
+
+/* ---------------------------------------------------------------- движение */
+@media (prefers-reduced-motion:no-preference){
+  .hero__title i{transform:translateY(110%);animation:rise 1.2s var(--ease) .15s forwards}
+  .hero__title span:nth-child(2) i{animation-delay:.3s}
+  .hero .eyebrow,.hero__lead,.hero__actions,.hero__stats,.hero__caption{
+    opacity:0;animation:fadeUp 1s var(--ease) forwards}
+  .hero .eyebrow{animation-delay:.42s}
+  .hero__lead{animation-delay:.56s}
+  .hero__actions{animation-delay:.7s}
+  .hero__stats{animation-delay:.84s}
+  .hero__caption{animation-delay:1.05s}
+}
+@keyframes rise{to{transform:translateY(0)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+html.js [data-reveal]{opacity:0;transform:translateY(18px)}
+html.js [data-reveal].is-in{opacity:1;transform:none;
+  transition:opacity .9s var(--ease) var(--d,0s),transform 1s var(--ease) var(--d,0s)}
+/* Если app.js не загрузился, карточки не должны остаться невидимыми. */
+html.js.reveal-off [data-reveal]{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){
+  html.js [data-reveal]{opacity:1;transform:none}
+}
+.hero__media{inset:-10% 0 0 0;will-change:transform}
 """
 
 JS = """
@@ -1548,7 +1910,9 @@ const counter = document.querySelector('[data-count]');
 const empty = document.querySelector('.empty');
 const controlsEl = document.querySelector('.controls');
 const toggleBtn = document.querySelector('.filters-toggle');
-let showPast = false;
+// Если сборка знает, что выходные уже закончились, прошедшее показываем
+// сразу — пустая сетка в воскресенье вечером выглядит как поломка.
+let showPast = Boolean(document.querySelector('[data-show-past="true"]'));
 
 // Действия для счётчика: GoatCounter не ставит cookie и не хранит персональные
 // данные, поэтому согласия посетителя не спрашиваем. Если скрипт не загрузился
@@ -1566,9 +1930,10 @@ function track(action, label){
 const active = new Set();
 chips.forEach(chip => {
   const key = chip.dataset.filter;
-  if (params.get(key) === '1' || chip.getAttribute('aria-current') === 'page') {
+  if (params.get(key) === '1' || chip.getAttribute('aria-current') === 'page'
+      || chip.getAttribute('aria-current') === 'true') {
     active.add(key);
-    chip.setAttribute('aria-current', 'page');
+    chip.setAttribute('aria-current', 'true');
   }
 });
 
@@ -1666,6 +2031,30 @@ function updatePast(past){
   pastToggle.setAttribute('aria-pressed', String(showPast));
 }
 
+// Если страница открыта с вечера пятницы до вечера воскресенья, в какой-то
+// момент все события становятся прошедшими. Не оставляем пустую сетку.
+let weekendStateDone = document.body.dataset.weekendOver === 'true';
+function ensureWeekendState(){
+  if (weekendStateDone || !cards.length) return;
+  if (!cards.every(card => isPast(card))) return;
+  weekendStateDone = true;
+  showPast = true;
+  const main = document.querySelector('main');
+  if (main) main.dataset.showPast = 'true';
+  const catalog = document.querySelector('.catalog');
+  if (catalog && !document.querySelector('.weekend-over')){
+    const box = document.createElement('div');
+    box.className = 'weekend-over';
+    box.setAttribute('role', 'status');
+    box.innerHTML = '<p class="weekend-over__title">Эти выходные закончились.</p>'
+      + '<p>Следующий выпуск — в пятницу. Пока показываем прошедшее.</p>';
+    catalog.before(box);
+  }
+  const cta = document.querySelector('.hero__actions .btn');
+  if (cta) cta.innerHTML = 'Показать прошедшее '
+    + '<span class="btn__arrow" aria-hidden="true">→</span>';
+}
+
 function apply(animate){
   const districts = pickerValues(districtPicker);
   const areas = pickerValues(areaPicker);
@@ -1688,30 +2077,25 @@ function apply(animate){
     card.classList.toggle('card--past', gone);
     const visible = matches && (!gone || showPast);
     card.hidden = !visible;
-    card.style.display = visible ? '' : 'none';
     if (visible) { shown++; visibleCards.push(card); }
   }
 
-  // Участники теста принимали неизменный порядок за сломанные фильтры:
-  // первая пара карточек подходила под любой фильтр и оставалась на месте.
-  // Пересобираем сетку по времени начала и подсвечиваем, что выдача изменилась.
-  if (gridEl){
-    visibleCards.sort((a, b) =>
-      (a.dataset.start || a.dataset.end || '').localeCompare(b.dataset.start || b.dataset.end || '')
-    );
-    for (const card of visibleCards) gridEl.appendChild(card);
-    for (const card of cards) if (card.hidden) gridEl.appendChild(card);
-    if (animate){
-      gridEl.classList.remove('grid--flash');
-      void gridEl.offsetWidth;
-      gridEl.classList.add('grid--flash');
-    }
+  // Порядок задаёт сервер: он уже отсортирован по типу, дате и времени.
+  // Клиентская перестановка на загрузке меняла первые карточки местами,
+  // а раз в минуту перестраивала всю сетку и могла уронить фокус.
+  if (gridEl && animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      && typeof Element.prototype.animate === 'function'){
+    visibleCards.slice(0, 28).forEach((card, i) => {
+      card.animate(
+        [{opacity: 0, transform: 'translateY(14px)'}, {opacity: 1, transform: 'none'}],
+        {duration: 520, delay: Math.min(i, 10) * 35,
+         easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both'}
+      );
+    });
   }
 
   if (counter) {
-    counter.textContent = shown === cards.length
-      ? shown + ' ' + plural(shown)
-      : shown + ' из ' + cards.length;
+    counter.textContent = shown + ' ' + plural(shown);
   }
   if (empty) empty.style.display = shown || past ? 'none' : 'block';
   updatePast(past);
@@ -1732,7 +2116,7 @@ chips.forEach(chip => chip.addEventListener('click', (e) => {
   // Одна метка может стоять дважды: в верхней строке на телефоне и в шторке.
   // Подсветку переносим на все копии, иначе непонятно, включён фильтр или нет.
   chips.filter(c => c.dataset.filter === key).forEach(c => {
-    if (active.has(key)) c.setAttribute('aria-current', 'page');
+    if (active.has(key)) c.setAttribute('aria-current', 'true');
     else c.removeAttribute('aria-current');
   });
   apply(true);
@@ -1773,13 +2157,13 @@ document.querySelectorAll('[data-picker-reset]').forEach(btn => {
 });
 
 document.addEventListener('click', (e) => {
-  document.querySelectorAll('details.picker[open]').forEach(picker => {
+  document.querySelectorAll('details[open]').forEach(picker => {
     if (!picker.contains(e.target)) picker.open = false;
   });
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    document.querySelectorAll('details.picker[open]').forEach(picker => { picker.open = false; });
+    document.querySelectorAll('details[open]').forEach(picker => { picker.open = false; });
   }
 });
 
@@ -1809,8 +2193,8 @@ document.querySelectorAll('.card__link').forEach(link => {
 document.querySelectorAll('.card__media').forEach(link => {
   link.addEventListener('click', () => track('click-poster'));
 });
-document.querySelectorAll('.card__report').forEach(link => {
-  link.addEventListener('click', () => track('report'));
+document.querySelectorAll('[data-track]').forEach(link => {
+  link.addEventListener('click', () => track(link.dataset.track));
 });
 
 // Статьи: видно, ведёт ли текст людей в каталог или сразу к организатору.
@@ -1837,10 +2221,67 @@ document.querySelectorAll('[data-reset]').forEach(btn => btn.addEventListener('c
   apply(true);
 }));
 
+ensureWeekendState();
 apply();
-// Время идёт: страница, открытая в браузере весь вечер, должна сама убрать
-// событие, которое только что закончилось.
-setInterval(apply, 60000);
+// Время идёт: страница, открытая весь вечер, должна сама убрать событие,
+// которое только что закончилось. Переставлять карточки не нужно — только
+// пересчитать видимость, иначе фокус и позиция скролла теряются.
+setInterval(() => { ensureWeekendState(); apply(false); }, 300000);
+// ------------------------------------------------------------------ движение
+// Всё необязательное: без JS и при reduced motion страница остаётся целой.
+(() => {
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const hero = document.querySelector('.hero');
+  const heroMedia = document.querySelector('.hero__media');
+  const bar = document.querySelector('.progress span');
+  const revealItems = [...document.querySelectorAll('[data-reveal]')];
+
+  if (revealItems.length){
+    if (reduce || !('IntersectionObserver' in window)){
+      revealItems.forEach(el => el.classList.add('is-in'));
+    } else {
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) return;
+          entry.target.classList.add('is-in');
+          io.unobserve(entry.target);
+        });
+      }, { rootMargin: '0px 0px -6% 0px', threshold: 0.05 });
+      revealItems.forEach(el => io.observe(el));
+    }
+  }
+  // Сигнал страховке в <head>: скрипт дошёл до появления карточек.
+  window.__revealReady = true;
+
+  let queued = false;
+  function frame(){
+    const y = window.scrollY || 0;
+    if (bar){
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      bar.style.transform = 'scaleX(' + (max > 0 ? Math.min(1, y / max) : 0) + ')';
+    }
+    if (hero && heroMedia && !reduce && window.innerWidth > 760){
+      if (y < hero.offsetHeight + 160){
+        heroMedia.style.transform = 'translate3d(0,' + (y * 0.09).toFixed(1) + 'px,0)';
+      }
+    }
+    queued = false;
+  }
+  function onScroll(){
+    if (!queued){ queued = true; requestAnimationFrame(frame); }
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll);
+  frame();
+
+  if (hero && !reduce && window.matchMedia('(pointer: fine)').matches){
+    hero.addEventListener('pointermove', (event) => {
+      const rect = hero.getBoundingClientRect();
+      hero.style.setProperty('--mx', ((event.clientX - rect.left) / rect.width * 100).toFixed(1) + '%');
+      hero.style.setProperty('--my', ((event.clientY - rect.top) / rect.height * 100).toFixed(1) + '%');
+    }, { passive: true });
+  }
+})();
 """
 
 PLACEHOLDER_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
@@ -1849,7 +2290,9 @@ PLACEHOLDER_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="640" height=
 </svg>
 """
 
-CURRENT_WEEKEND = weekend_of(date.today())
+# Заглушка до build(): тот пересчитает выходные от today с учётом --date.
+# Дата машины здесь не годится: на сервере она может быть в UTC.
+CURRENT_WEEKEND = weekend_of(now_nsk().date())
 
 # Статьи загружаются в build(); здесь — заглушка, чтобы page_html и подвал
 # могли проверить наличие раздела до первой сборки.
@@ -1867,6 +2310,8 @@ def main(argv=None) -> int:
     parser.add_argument("--save-cache", default="", help="сохранить снимок таблицы в CSV")
     parser.add_argument("--out", default="dist", help="папка результата")
     parser.add_argument("--date", help="считать эту дату сегодняшней (YYYY-MM-DD)")
+    parser.add_argument("--now", help="считать это время текущим (ISO, для проверки "
+                                      "состояния «выходные закончились»)")
     parser.add_argument("--base", default="",
                         help="подпапка для GitHub Pages, например /plany-na-vyhodnye")
     parser.add_argument("--site-url", default="",
@@ -1874,11 +2319,13 @@ def main(argv=None) -> int:
                              "(по умолчанию SITE_URL)")
     args = parser.parse_args(argv)
 
-    global SITE_URL
+    global SITE_URL, NOW_OVERRIDE
     if args.site_url:
         SITE_URL = args.site_url.rstrip("/")
+    if args.now:
+        NOW_OVERRIDE = datetime.fromisoformat(args.now)
 
-    today = date.fromisoformat(args.date) if args.date else date.today()
+    today = date.fromisoformat(args.date) if args.date else now_nsk().date()
     print(f"[i] Сборка на {today:%d.%m.%Y}, выходные {weekend_of(today)[0]:%d.%m}–{weekend_of(today)[1]:%d.%m}")
 
     rows: list[dict] | None = None
