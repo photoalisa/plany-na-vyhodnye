@@ -849,7 +849,7 @@ def page_html(*, title: str, description: str, lead: str, events: list[dict],
   </div>
   {controls}
   <p class="weekend-over" data-weekend-over hidden>
-    <strong>Эти выходные закончились.</strong> Следующий выпуск — в пятницу, пока показываем прошедшее.
+    <strong>Эти выходные закончились.</strong> Пока показываем прошедшее.
   </p>
 
 {sr_heading}  <div class="grid">{cards}</div>
