@@ -221,7 +221,9 @@ class SheetStore:
                     norm = textmod.normalize_title(
                         row[title_col] if len(row) > title_col else "")
                     start = row[start_col] if len(row) > start_col else ""
-                    if norm and start:
+                    # Строки без даты тоже участвуют в сверке: у выставок
+                    # «постоянно» её нет, и агрегатор иначе дублировал площадку.
+                    if norm:
                         self.twins.append((
                             idx, norm, start,
                             row[end_col] if len(row) > end_col else "",
@@ -234,17 +236,20 @@ class SheetStore:
     def _find_twin(self, ev: dict) -> int | None:
         """Активная строка о том же событии: пересекающиеся даты, похожее название и площадка."""
         norm = textmod.normalize_title(ev.get("title", ""))
-        start = ev.get("date_start", "")
-        if not norm or not start:
+        start = ev.get("date_start", "") or ""
+        if not norm:
             return None
         end = ev.get("date_end") or start
         venue = (ev.get("venue") or "").lower()
         time_text = (ev.get("time_text") or "")[:5]
         for idx, other_norm, other_start, other_end, other_time, other_venue in self.twins:
             # Агрегатор и площадка часто ставят разные рамки у одной выставки,
-            # поэтому сравниваем не начало, а пересечение периодов.
-            if (other_end or other_start) < start or end < other_start:
-                continue
+            # поэтому сравниваем не начало, а пересечение периодов. Пустая дата
+            # у одной из сторон не повод считать события разными: у выставок
+            # «постоянно» её нет, и карточка агрегатора иначе не опознавалась.
+            if start and other_start:
+                if (other_end or other_start) < start or end < other_start:
+                    continue
             # Точное совпадение названия — дубль даже при разных названиях
             # площадки: агрегатор пишет её по-своему.
             if norm == other_norm:
