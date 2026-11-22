@@ -2,7 +2,7 @@
 out/
 .cache/
 dist/
-dist_pages/
+dist_*/
 public/
 *.log
 
