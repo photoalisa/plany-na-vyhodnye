@@ -42,8 +42,11 @@ def main(argv: list[str]) -> int:
         for other_idx, o_norm, o_start, o_end, o_time, o_venue in store.twins:
             if other_idx == row_idx:
                 continue
-            if (o_end or o_start) < start or (end or start) < o_start:
-                continue
+            # Пустая дата у одной из сторон — не несовпадение: у выставок
+            # «постоянно» её нет, и агрегатор иначе дублировал карточку площадки.
+            if start and o_start:
+                if (o_end or o_start) < start or (end or start) < o_start:
+                    continue
             v1, v2 = venue.lower(), o_venue.lower()
             same_venue = not (v1 and v2) or (
                 v1 in v2 or v2 in v1 or text.similar(v1, v2) >= 0.6
