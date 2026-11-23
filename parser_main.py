@@ -306,6 +306,12 @@ def main(argv=None) -> int:
     if dropped:
         print(f"[+] Снято с публикации: {dropped} — событий больше нет в источниках")
 
+    # Прошедшие события помечаем archived: сами по себе они не стареют, иначе
+    # висят в выдаче активными, потому что ни один прогон их не трогает.
+    stale = store.archive_stale(today)
+    if stale:
+        print(f"[+] Помечено прошедшими: {stale}")
+
     # Неактивные строки не держим в рабочем листе: уносим в archive.
     moved = store.move_inactive()
     if moved:
