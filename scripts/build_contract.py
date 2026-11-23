@@ -349,6 +349,9 @@ def pitfalls() -> list[str]:
         "  (`parkigoroda-nsk.ru/november_parki`, `bibliosib.ru/directions/childrens`):",
         "  в индекс `by_url` такая ссылка не попадает, строки живут по `id`.",
         "- **Кириллица в путях** только через `-LiteralPath`, heredoc в PowerShell ломается.",
+        "- **Квота Sheets API** — 60 записей в минуту на пользователя: удалять строки,",
+        "  обновлять ячейки и дописывать блоки нужно одним `batchUpdate` или пачками,",
+        "  а не по строке за вызов.",
     ]
 
 
