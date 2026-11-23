@@ -575,9 +575,27 @@ class SheetStore:
             for start in range(0, len(payload), BATCH):
                 _retry(ws.append_rows, payload[start:start + BATCH],
                        value_input_option="USER_ENTERED")
-        # Снизу вверх: после удаления строки номера ниже сдвигаются.
-        for idx, _row in sorted(targets, key=lambda pair: pair[0], reverse=True):
-            _retry(self.sheet.delete_rows, idx)
+        # Удаляем одним batchUpdate по непрерывным диапазонам: построчный
+        # delete_rows — это запрос на каждую строку, а квота 60 записей в минуту
+        # на пользователя. Диапазоны идут сверху вниз по убыванию, чтобы
+        # удаление верхних не сдвигало номера нижних.
+        ranges: list[list[int]] = []
+        for idx in sorted(row_idx for row_idx, _ in targets):
+            if ranges and idx == ranges[-1][1] + 1:
+                ranges[-1][1] = idx
+            else:
+                ranges.append([idx, idx])
+        requests_body = [
+            {"deleteDimension": {"range": {
+                "sheetId": self.sheet.id,
+                "dimension": "ROWS",
+                "startIndex": start - 1,
+                "endIndex": end,
+            }}}
+            for start, end in sorted(ranges, key=lambda pair: pair[0], reverse=True)
+        ]
+        if requests_body:
+            _retry(self.sheet.spreadsheet.batch_update, {"requests": requests_body})
         self._load_index()
         return len(targets)
 
