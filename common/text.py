@@ -701,12 +701,20 @@ _OTHER_CITIES = (
 )
 
 
+_FAR_CITY_RE = re.compile("|".join(f"{city}(?!\\w*ая\\b)" for city in _OTHER_CITIES))
+
+
 def is_far_city(*texts: str) -> bool:
-    """Событие не из Новосибирска и не из его пригородов."""
+    """Событие не из Новосибирска и не из его пригородов.
+
+    Город ищем без хвоста «-ая»: «ул. Красноярская» — новосибирская улица,
+    а не Красноярск. Без этого события у «Карты мира» на Красноярской, 3
+    отсеивались как чужой город.
+    """
     blob = " ".join(t for t in texts if t).lower()
     if "новосибирск" in blob:
         return False
-    return any(city in blob for city in _OTHER_CITIES)
+    return bool(_FAR_CITY_RE.search(blob))
 
 
 def parse_price(*texts: str) -> tuple[str, bool]:
