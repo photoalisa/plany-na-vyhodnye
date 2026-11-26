@@ -175,13 +175,26 @@ def _beyond_weekend(cards: list, today) -> bool:
     return False
 
 
+def _get(url: str, ttl: int = 1800) -> str:
+    """Страница листинга с одной повторной попыткой.
+
+    ngonb.ru временами не отвечает за 20 секунд. 23.11 источник отдал ноль
+    событий, и в журнале это выглядело как обычный пустой прогон: по логу
+    не отличить сбой сети от «на выходных ничего нет».
+    """
+    html = http.get_text(url, ttl=ttl)
+    if not html:
+        html = http.get_text(url, timeout=45, ttl=0, refresh=True)
+    return html
+
+
 def _cards(url: str, today, paginate: bool = False) -> list:
     """Карточки раздела. С пагинацией идём, пока не упрёмся в даты после выходных."""
     found: list = []
     seen: set[str] = set()
     for page in range(1, PAGE_LIMIT + 1):
         page_url = url if page == 1 else f"{url}?PAGEN_2={page}"
-        html = http.get_text(page_url, ttl=1800)
+        html = _get(page_url)
         if not html:
             break
         soup = bs4.BeautifulSoup(html, "html.parser")
@@ -246,7 +259,7 @@ def _dv_events() -> list[dict]:
     выходные находятся даже тогда, когда в общем списке они уехали на
     вторую страницу.
     """
-    html = http.get_text(DV_AFISHA, ttl=1800)
+    html = _get(DV_AFISHA)
     if not html:
         return []
     soup = bs4.BeautifulSoup(html, "html.parser")
