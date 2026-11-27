@@ -94,7 +94,16 @@ def _run_source(src, today: date, hidden: set[str] | None = None) -> tuple[Sourc
         merged["category"] = merged.get("category") or src.category
         event = model.make_event(**merged)
         model.fix_past_opening(event, today)
-        if event.get("id") in hidden or (event.get("source_url") or "") in hidden:
+        # Скрытие по названию: в листе `hidden` названия лежат нормализованными,
+        # поэтому сравнивать с сырым заголовком бессмысленно — раньше проверка
+        # работала только по id и ссылке, и удалённое возвращалось всякий раз,
+        # когда источник отдавал событие по новому адресу.
+        norm_title = text.normalize_title(event.get("title") or "")
+        if (
+            event.get("id") in hidden
+            or (event.get("source_url") or "") in hidden
+            or (norm_title and norm_title in hidden)
+        ):
             stat.add_error("hidden")
             continue
         if not model.is_relevant(event, today):
