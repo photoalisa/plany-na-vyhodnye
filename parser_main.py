@@ -1,4 +1,4 @@
-"""Оркестратор парсера «Планы на выходные | Новосибирск».
+﻿"""Оркестратор парсера «Планы на выходные | Новосибирск».
 
 Запуск:
     python parser_main.py                 # собрать и записать в Google Sheets
@@ -73,6 +73,23 @@ def save_last_ids(ids: set[str]) -> None:
     LAST_IDS.write_text(json.dumps(sorted(ids), ensure_ascii=False), encoding="utf-8")
 
 
+def load_snapshot(store: sheets.SheetStore) -> set[str]:
+    """Снимок прошлого прогона: из книги, а файл — запасной вариант.
+
+    В облаке файл не доживает до следующего запуска, поэтому основной
+    источник — служебный лист `snapshot`.
+    """
+    if store.sheet is not None:
+        return store.snapshot_load()
+    return load_last_ids()
+
+
+def save_snapshot(store: sheets.SheetStore, ids: set[str]) -> None:
+    if store.sheet is not None:
+        store.snapshot_save(ids)
+    save_last_ids(ids)
+
+
 def prepare_hidden(hidden: HiddenStore, store: sheets.SheetStore) -> int:
     """До сбора помечаем то, что вы удалили из таблицы руками.
 
@@ -83,7 +100,7 @@ def prepare_hidden(hidden: HiddenStore, store: sheets.SheetStore) -> int:
     if store.sheet is None:
         return 0
 
-    previous = load_last_ids()
+    previous = load_snapshot(store)
     current = set(store.existing)
     if not previous:
         save_last_ids(current)
@@ -139,7 +156,7 @@ def remember_ids(store: sheets.SheetStore, events: list[dict]) -> None:
     if store.sheet is None:
         print("[i] CSV-режим: снимок id не трогаю, чтобы не потерять ручные удаления")
         return
-    save_last_ids(set(store.existing))
+    save_snapshot(store, set(store.existing))
 
 
 def save_review(book, queue: list[dict]) -> None:
@@ -231,7 +248,7 @@ def main(argv=None) -> int:
         # Удаления из таблицы запоминаем без полного прогона: событие больше
         # не вернётся при следующем сборе.
         marked = prepare_hidden(hidden, store)
-        save_last_ids(set(store.existing))
+        save_snapshot(store, set(store.existing))
         print(f"[+] Запомнено удалённых: {marked}")
         return 0
 
