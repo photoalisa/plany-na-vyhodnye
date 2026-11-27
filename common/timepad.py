@@ -99,7 +99,9 @@ def fetch_org(base: str, *, source: str, venue: str, address: str,
             "image_url": _image(card),
             "venue": venue,
             "address": address,
-            "district": district or text.guess_district(description, strict=True),
+            "district": (district
+                         or text.guess_district(address, strict=True)
+                         or text.guess_district(description, strict=True)),
             "text_raw": description,
             # Цены в ленте нет: сайт покажет «Цена на сайте».
             "price_text": "",
