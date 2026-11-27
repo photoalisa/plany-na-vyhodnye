@@ -69,6 +69,15 @@ def _enrich(ev: dict) -> dict:
         elif found:
             ev["address"] = found
             ev["district"] = ev.get("district") or text.guess_district(found)
+
+    # В карточке место часто записано только адресом («Новосибирск, ул. Гоголя, 13»):
+    # площадка там не названа, и в таблицу уходила пустая строка. Пробуем узнать
+    # её по адресу и тексту анонса.
+    if not (ev.get("venue") or "").strip():
+        known = text.recognize_venue(ev.get("address", ""), ev["text_raw"], ev["title"])
+        if known:
+            ev["venue"] = known.get("venue") or ""
+            ev["district"] = ev.get("district") or known.get("district") or ""
     return ev
 
 
