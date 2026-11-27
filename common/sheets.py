@@ -31,6 +31,10 @@ ARCHIVE_TAB = "archive"
 # Снимок того, что парсер предлагал в прошлый раз: по нему видно, какие
 # ячейки человек правил руками, и такие правки не затираются.
 BASE_TAB = "parsed"
+# Id строк прошлого прогона: по нему видно, что человек удалил из таблицы.
+# Лежит в книге, а не в файле: файл в контейнере GitHub Actions не переживает
+# прогон, из-за чего удаления в облаке не запоминались вовсе.
+SNAPSHOT_TAB = "snapshot"
 # Служебные колонки пишем всегда от парсера: id — ключ строки, остальное —
 # отметки времени. Их правка ломает сопоставление и сравнение.
 SERVICE_COLUMNS = ("id", "parsed_at", "checked_at")
@@ -273,6 +277,42 @@ class SheetStore:
             ):
                 return idx
         return None
+
+    # ------------------------------------------------- снимок прогона
+    def _snapshot_sheet(self):
+        try:
+            return self.book.worksheet(SNAPSHOT_TAB)
+        except Exception:  # noqa: BLE001
+            ws = self.book.add_worksheet(title=SNAPSHOT_TAB, rows=3000, cols=2)
+            ws.update(values=[["id", "saved_at"]], range_name="A1:B1")
+            return ws
+
+    def snapshot_load(self) -> set[str]:
+        """Id строк, которые были в таблице после прошлого прогона."""
+        if self.book is None:
+            return set()
+        try:
+            values = self._snapshot_sheet().get_all_values()
+        except Exception as e:  # noqa: BLE001
+            print(f"[!] Снимок не прочитан: {e}")
+            return set()
+        return {row[0].strip() for row in values[1:] if row and row[0].strip()}
+
+    def snapshot_save(self, ids: set[str]) -> None:
+        """Перезаписывает снимок целиком: список id после текущего прогона."""
+        if self.book is None:
+            return
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        rows = [[key, stamp] for key in sorted(ids)]
+        try:
+            ws = self._snapshot_sheet()
+            _retry(ws.batch_clear, ["A2:B"])
+            for start in range(0, len(rows), 2000):
+                chunk = rows[start:start + 2000]
+                _retry(ws.update, values=chunk, range_name=f"A{start + 2}",
+                       value_input_option="RAW")
+        except Exception as e:  # noqa: BLE001
+            print(f"[!] Снимок не записан: {e}")
 
     def _log_sheet(self):
         """Лист прогонов; никогда не совпадает с листом данных."""
