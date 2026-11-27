@@ -52,8 +52,13 @@ def _cache_path(url: str) -> Path:
     return CACHE_DIR / key[:2] / f"{key}.txt"
 
 
-def get_text(url: str, timeout: int = 20, ttl: int = 3600, refresh: bool = False) -> str:
-    """GET с дисковым кэшем. ttl=0 — без кэша. Возвращает '' при ошибке."""
+def get_text(url: str, timeout: int = 20, ttl: int = 3600, refresh: bool = False,
+             headers: dict | None = None) -> str:
+    """GET с дисковым кэшем. ttl=0 — без кэша. Возвращает '' при ошибке.
+
+    `headers` добавляются к заголовкам сессии: нужно, когда сайт отвечает
+    только на «полный» браузерный запрос (Timepad с адресов хостингов).
+    """
     if CACHE_ENABLED and ttl > 0 and not refresh:
         path = _cache_path(url)
         if path.exists() and (time.time() - path.stat().st_mtime) < ttl:
@@ -62,7 +67,7 @@ def get_text(url: str, timeout: int = 20, ttl: int = 3600, refresh: bool = False
             except OSError:
                 pass
     try:
-        r = session().get(url, timeout=timeout)
+        r = session().get(url, timeout=timeout, headers=headers)
         if r.status_code != 200:
             print(f"  [-][http] {url} -> {r.status_code}")
             return ""
