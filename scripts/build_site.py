@@ -381,13 +381,33 @@ def sort_key(ev: dict):
     )
 
 
+def _poster_html(ev: dict) -> str:
+    """Подложка карточки, пока нет афиши: число и месяц или «постоянно»."""
+    start = ev.get("start")
+    if start:
+        return (
+            '<span class="card__poster" aria-hidden="true">'
+            f'<span class="card__poster-day">{start.day}</span>'
+            f'<span class="card__poster-mon">{MONTHS_SHORT[start.month - 1]}</span>'
+            '</span>'
+        )
+    note = "постоянно" if ev.get("kind") == "permanent" else "событие"
+    return ('<span class="card__poster" aria-hidden="true">'
+            f'<span class="card__poster-note">{note}</span></span>')
+
+
 def card_html(ev: dict, weekend: bool = True) -> str:
     img = ev["image"]
+    # Афиши с чужих CDN грузятся медленно и иногда не приходят вовсе. Пока
+    # картинки нет, в кадре стоит типографская подложка с числом и месяцем —
+    # она читается как намеренная, а не как пустое место. Загрузившаяся
+    # картинка закрывает её классом has-photo.
+    poster = _poster_html(ev)
     image_html = (
         f'<img src="{esc(img)}" alt="{esc(ev["title"])}" loading="lazy" width="640" height="480" '
-        f'onerror="this.onerror=null;this.src=\'PLACEHOLDER\'">'
-        if img else
-        '<img src="PLACEHOLDER" alt="" loading="lazy" width="640" height="480">'
+        f'onload="this.parentElement.classList.add(\'has-photo\')" '
+        f'onerror="this.remove()">'
+        if img else ""
     )
     meta = [date_label(ev, weekend)]
     # За городом района города нет — вместо него показываем населённый пункт,
@@ -439,6 +459,7 @@ def card_html(ev: dict, weekend: bool = True) -> str:
     return f"""
 <article class="card" {attrs}{day_attr}{end_attr}{start_attr} data-district="{esc(ev['district'])}" data-geo="{esc(ev['area'])}">
   <a class="card__media" href="{esc(ev['url'])}" target="_blank" rel="noopener nofollow" title="{esc(open_hint)}" tabindex="-1" aria-hidden="true">
+    {poster}
     {image_html}
   </a>
   <div class="card__body">
@@ -1411,6 +1432,17 @@ select{border:1px solid var(--line);background:transparent;color:var(--ink);bord
 /* Картинка вынута из потока: иначе её собственная высота растягивала кадр
    и соотношение 4:3 не соблюдалось. */
 .card__media img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center}
+/* Подложка кадра: пока афиша не пришла (чужой CDN медленный или отдал
+   ошибку), в кадре стоит дата крупным числом. Загрузившаяся картинка
+   закрывает подложку классом has-photo — иначе на постерах с полями
+   просвечивали бы месяц и число. */
+.card__poster{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:2px;padding:8px;text-align:center;color:var(--accent);
+  background:linear-gradient(155deg,#F8F4EB 0%,#EDE7DA 100%)}
+.card__poster-day{font-size:clamp(34px,8vw,58px);line-height:.92;font-weight:650;letter-spacing:-.03em}
+.card__poster-mon{font-size:12px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+.card__poster-note{font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.card__media.has-photo .card__poster{display:none}
 .card__body{padding:14px 16px 18px;display:flex;flex-direction:column;gap:8px;flex:1}
 .card__meta{display:flex;flex-direction:column;gap:5px;margin:0}
 .card__meta-row{display:flex;align-items:flex-start;gap:6px;font-size:13px;font-weight:600;
