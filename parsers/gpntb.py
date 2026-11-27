@@ -103,6 +103,7 @@ def fetch() -> list[dict]:
             "time_text": f"{start:%H:%M}",
             "venue": VENUE,
             "address": ADDRESS,
+            "district": text.guess_district(ADDRESS, strict=True),
             "text_raw": description or title,
             "age_text": str(item.get("ageLimit") or ""),
             "price_text": "",
