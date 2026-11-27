@@ -277,7 +277,10 @@ def main(argv=None) -> int:
         today=today,
         check_images=CHECK_IMAGES and not args.no_images,
         workers=PARALLEL_SOURCES,
-        hidden=hidden.keys | hidden.urls,
+        # titles тоже: лист `hidden` прячет событие и по названию, но в сбор
+        # уходили только id и ссылки. Из-за этого удалённое возвращалось —
+        # источник приходил с новой ссылкой и тем же названием.
+        hidden=hidden.keys | hidden.urls | hidden.titles,
         enrich=not args.no_enrich,
     )
 
