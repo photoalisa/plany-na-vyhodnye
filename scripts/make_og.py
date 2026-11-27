@@ -1,15 +1,14 @@
-"""Превью ссылки (og:image) под текущие выходные.
+"""Превью ссылки (og:image) без дат.
 
-    python scripts/make_og.py            # на ближайшие выходные
-    python scripts/make_og.py --date 2026-11-14
+    python scripts/make_og.py
 
-Рисует 1200×630 в стиле сайта: знак-пилон, Golos Text, тёплый фон #FBFAF7
-и дата выходных крупно справа. Файл кладётся в static/og.png, откуда сборка
-копирует его в корень сайта.
+Рисует 1200×630 в стиле сайта: знак-пилон, Golos Text, тёплый фон #FBFAF7.
+Справа крупно «сб–вс» и обещание обновления, дат в картинке нет: превью
+показывается в чужих лентах неделями, и дата прошлых выходных в нём читается
+как устаревшая афиша. Файл кладётся в static/og.png, откуда сборка копирует
+его в корень сайта.
 
-Нужен Playwright (`pip install playwright`, `playwright install chromium`) —
-он уже используется для локальных проверок. Каждую неделю перед публикацией
-скрипт запускается заново: иначе в превью останется прошлая дата.
+Нужен Playwright (`pip install playwright`, `playwright install chromium`).
 """
 
 from __future__ import annotations
@@ -41,7 +40,7 @@ def label(sat: date, sun: date) -> tuple[str, str]:
             MONTHS[sun.month - 1])
 
 
-def html(dates: str, month: str) -> str:
+def html() -> str:
     mark_svg = MARK.read_text(encoding="utf-8")
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
@@ -84,12 +83,12 @@ html,body{{margin:0;padding:0;width:1200px;height:630px;background:#FBFAF7;
       <h1>Куда пойти<br>на выходных</h1>
       <p>Выставки, лекции, концерты и прогулки.<br>Каждое событие ведёт на источник.</p>
     </div>
-    <div class="foot"><b>суббота и воскресенье</b> · афиша на два дня</div>
+    <div class="foot"><b>суббота и воскресенье</b> · обновляется каждую неделю</div>
   </div>
   <div class="right">
-    <div class="days">{dates}</div>
-    <div class="month">{month}</div>
-    <div class="note">Афиша Новосибирска на два дня</div>
+    <div class="days">сб–вс</div>
+    <div class="month">афиша на два дня</div>
+    <div class="note">Бесплатные и платные,<br>для детей и взрослых</div>
   </div>
 </div></body></html>
 """
@@ -114,17 +113,13 @@ async def render(markup: str, out: Path) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Превью ссылки под текущие выходные")
-    parser.add_argument("--date", help="считать эту дату сегодняшней (YYYY-MM-DD)")
+    parser = argparse.ArgumentParser(description="Превью ссылки без дат")
     parser.add_argument("--out", default=str(DEFAULT_OUT), help="куда сохранить PNG")
     args = parser.parse_args()
 
-    today = date.fromisoformat(args.date) if args.date else date.today()
-    sat, sun = weekend_of(today)
-    dates, month = label(sat, sun)
     out = Path(args.out)
-    asyncio.run(render(html(dates, month), out))
-    print(f"[+] {out} — {dates} {month}")
+    asyncio.run(render(html(), out))
+    print(f"[+] {out}")
     return 0
 
 
