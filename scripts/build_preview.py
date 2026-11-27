@@ -1,4 +1,4 @@
-"""Собирает локальный прототип каталога из out/nsk_weekend.csv.
+﻿"""Собирает локальный прототип каталога из out/nsk_weekend.csv.
 
     python scripts/build_preview.py
 
