@@ -51,10 +51,21 @@ def _image(card: bs4.element.Tag) -> str:
 def fetch() -> list[dict]:
     html = http.get_text(AFISHA, ttl=1800)
     if not html:
+        # Timepad из облака иногда отвечает не страницей, а заглушкой:
+        # на GitHub-раннере 27.11 источник отдал ноль. Повторяем без кеша.
+        print("  [!] лента не загрузилась, повторяю без кеша")
+        html = http.get_text(AFISHA, timeout=45, ttl=0, refresh=True)
+    if not html:
+        print("  [!] лента недоступна: пустой ответ")
         return []
     soup = bs4.BeautifulSoup(html, "html.parser")
     cards = soup.select(".t-card_event")
-    print(f"  карточек: {len(cards)}")
+    print(f"  карточек: {len(cards)} (байт: {len(html)})")
+    if not cards:
+        # Молчаливый ноль неотличим от «событий нет»: пишем, что пришло.
+        blok = "блок" if "t-card_event" in html else "нет разметки карточек"
+        print(f"  [!] разметка не найдена: {blok}; первые байты: {html[:120]!r}")
+        return []
 
     out: list[dict] = []
     seen: set[str] = set()
