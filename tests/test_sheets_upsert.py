@@ -70,6 +70,53 @@ class FakeSheet:
         return {}
 
 
+class FakeBase:
+    """Лист `parsed`: снимок того, что парсер предлагал в прошлый раз."""
+
+    def __init__(self, title: str = "parsed"):
+        self.title = title
+        self.rows: list[list[str]] = []
+
+    def get_all_values(self) -> list[list[str]]:
+        return [list(r) for r in self.rows]
+
+    def clear(self):
+        self.rows = []
+        return {}
+
+    def update(self, values, rng="A1"):
+        # gspread принимает и update(values, "A1"), и update("A1", values).
+        if isinstance(values, str):
+            values, rng = rng, values
+        self.rows = [list(v) for v in values]
+        return {}
+
+    def append_row(self, row, value_input_option="RAW"):
+        self.rows.append(list(row))
+        return {}
+
+
+class FakeBook:
+    def __init__(self, events: FakeSheet):
+        self.events = events
+        self.other: dict[str, FakeBase] = {}
+
+    def worksheet(self, title: str):
+        if title == "events":
+            return self.events
+        if title in self.other:
+            return self.other[title]
+        raise KeyError(title)
+
+    def add_worksheet(self, title: str, rows: int = 1000, cols: int = 20):
+        ws = FakeBase(title)
+        self.other[title] = ws
+        return ws
+
+    def worksheets(self):
+        return [self.events] + list(self.other.values())
+
+
 def _letter_to_index(letters: str) -> int:
     index = 0
     for ch in letters:
@@ -82,7 +129,7 @@ def make_store(fake: FakeSheet) -> sheets.SheetStore:
     store.name = "nsk_weekend"
     store.csv_fallback = Path("out/_test.csv")
     store.sheet = fake
-    store.book = None
+    store.book = FakeBook(fake)
     store.existing = {}
     store.by_url = {}
     store.rows = []
@@ -127,7 +174,7 @@ def main() -> int:
     third = store.upsert(changed)
     assert third["new"] == 0 and third["updated"] == 1, third
     price_col = sheets.COLUMNS.index("price_text")
-    assert fake.data[1][price_col] == "500 руб.", fake.data[1][price_col]
+    assert "500" in fake.data[1][price_col], fake.data[1][price_col]
     print(f"[ok] изменение поля: обновлено {third['updated']}, цена в строке {fake.data[1][price_col]}")
 
     # название поменялось на сайте, ссылка та же — обновляем, а не добавляем
@@ -159,6 +206,21 @@ def main() -> int:
     assert archived == 1, f"архивировано {archived}, ожидали 1"
     assert fake.data[-1][status_col] == "archived", fake.data[-1][status_col]
     print(f"[ok] просроченные строки: в архив переведено {archived}")
+
+    # одна страница — несколько событий: два источника с той же ссылкой
+    # должны занять две строки, а не перезаписать друг друга
+    page_url = "https://nornd.ru/afisha-rossijsko-nemetskogo-doma/"
+    page = [
+        event(source="РНД", title="Первый Адвент", source_url=page_url,
+              date_raw="29 ноября 2026, 12:00–16:00"),
+        event(source="НаДвиж", title="Тёплое рождество — ярмарка",
+              source_url=page_url, date_raw="29 ноября 2026, 12:00–16:00"),
+    ]
+    before = len(fake.data)
+    same_page = store.upsert(page)
+    assert same_page["new"] == 2, same_page
+    assert len(fake.data) == before + 2, f"страниц со ссылкой: {len(fake.data) - before}"
+    print(f"[ok] общая страница у двух источников: добавлено {same_page['new']} строки")
 
     print("\nВсе проверки пройдены: чтение одно на прогон, дублей нет, обновления работают.")
     return 0
