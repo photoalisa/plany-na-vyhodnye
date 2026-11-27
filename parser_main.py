@@ -122,6 +122,22 @@ def prepare_hidden(hidden: HiddenStore, store: sheets.SheetStore) -> int:
               f"Если удаления были настоящими: python parser_main.py --hide <id>.")
         return 0
 
+    # Строка могла не исчезнуть, а уехать в лист `archive`: так делают
+    # move_inactive и archive_stale. Это не ручное удаление, и скрывать такие
+    # события нельзя — иначе прошедшее событие выпадает из каталога навсегда
+    # вместе с будущими выпусками того же источника.
+    try:
+        archived = store._archived_ids()
+    except Exception as e:  # noqa: BLE001
+        print(f"[!] Лист archive не прочитан ({type(e).__name__}) — "
+              f"скрою только то, чего нет и там.")
+        archived = set()
+    if archived:
+        moved = missing & archived
+        if moved:
+            print(f"[i] В архив уехали строки: {len(moved)} — их не скрываю")
+        missing -= moved
+
     # Название и ссылку берём из снимка прошлого прогона: без них скрытие
     # работало только по id, а id меняется, если источник поправил заголовок.
     store._load_base()
