@@ -63,7 +63,10 @@ def _key(row: list[str]) -> str:
 def _index(store: sheets.SheetStore) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
     """Сопоставление по id, ссылке и паре «название + дата» — из текущей таблицы."""
     by_id = dict(store.existing)
-    by_url = dict(store.by_url)
+    # Ссылка хранится со списком строк и их источниками: одна страница может
+    # описывать несколько событий. Однозначной она считается, когда строка
+    # ровно одна.
+    by_url = {url: hits[0][0] for url, hits in store.by_url.items() if len(hits) == 1}
     by_title = {key: idx for key, idx in store.by_title_date.items() if idx}
     return by_id, by_url, by_title
 
