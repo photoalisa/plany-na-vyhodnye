@@ -120,13 +120,13 @@ class SheetStore:
         self.sheet = None
         self.book = None
         self.existing: dict[str, int] = {}
-        self.by_url: dict[str, int] = {}
+        self.by_url: dict[str, list[tuple[int, str]]] = {}
         self.by_title_date: dict[str, int | None] = {}
         self.twins: list[tuple[int, str, str, str, str, str]] = []
         self.rows: list[list[str]] = []
         # Снимок прошлого прогона: по нему отличаем ручные правки от данных.
         self.base_rows: dict[str, list] = {}
-        self.base_by_url: dict[str, list] = {}
+        self.base_by_url: dict[str, list[list]] = {}
         self.ws_rows = 0
         if not use_google:
             print("[i] Режим CSV: Google Sheets не используется")
@@ -189,6 +189,7 @@ class SheetStore:
         self.by_url = {}
         self.by_title_date = {}
         url_col = COLUMNS.index("source_url")
+        source_col = COLUMNS.index("source")
         title_col = COLUMNS.index("title")
         start_col = COLUMNS.index("date_start")
         end_col = COLUMNS.index("date_end")
@@ -198,20 +199,18 @@ class SheetStore:
         # Для поиска межуточных дублей: агрегатор и площадка называют одно
         # событие по-разному, но дата начала и площадка у них совпадают.
         self.twins: list[tuple[int, str, str, str, str, str]] = []
-        ambiguous_urls: set[str] = set()
         for idx, row in enumerate(values[1:], start=2):
             if row and row[0].strip():
                 self.existing[row[0].strip()] = idx
                 if len(row) > url_col and row[url_col].strip():
                     url = row[url_col].strip()
-                    # Одна страница может описывать несколько событий (у музея
-                    # на одной странице четыре экспозиции). Такую ссылку в
-                    # индекс не берём: иначе все события схлопнутся в одну
-                    # строку, и в таблице останется последнее.
-                    if url in self.by_url:
-                        ambiguous_urls.add(url)
-                    else:
-                        self.by_url[url] = idx
+                    # Одна страница описывает несколько событий (афиша РНД,
+                    # парки): ссылка запоминается со списком строк и их
+                    # источниками, а поиск по ней идёт только внутри своего
+                    # источника. Иначе событие другой площадки садилось
+                    # в чужую строку с той же ссылкой.
+                    source = row[source_col] if len(row) > source_col else ""
+                    self.by_url.setdefault(url, []).append((idx, source))
                 # Третья попытка сопоставления — на случай, если в таблице
                 # поправили ссылку: ищем по названию и дате начала.
                 key = _title_key(
@@ -234,8 +233,17 @@ class SheetStore:
                             (row[time_col] if len(row) > time_col else "")[:5],
                             row[venue_col] if len(row) > venue_col else "",
                         ))
-        for url in ambiguous_urls:
-            self.by_url.pop(url, None)
+
+    def _url_match(self, url: str, source: str) -> int | None:
+        """Строка с той же ссылкой и тем же источником.
+
+        Совпадение только по ссылке опасно: у афиши, где события лежат одной
+        страницей, ссылка у всех одна, и событие садилось в чужую строку.
+        Несколько строк своего источника с этой ссылкой — поиск не по ссылке.
+        """
+        hits = [idx for idx, row_source in self.by_url.get(url) or []
+                if row_source == source]
+        return hits[0] if len(hits) == 1 else None
 
     def _find_twin(self, ev: dict) -> int | None:
         """Активная строка о том же событии: пересекающиеся даты, похожее название и площадка."""
@@ -337,7 +345,7 @@ class SheetStore:
     def _load_base(self) -> None:
         """Читаем снимок и раскладываем по id и по ссылке."""
         self.base_rows: dict[str, list] = {}
-        self.base_by_url: dict[str, list] = {}
+        self.base_by_url: dict[str, list[list]] = {}
         if self.sheet is None:
             return
         try:
@@ -354,13 +362,22 @@ class SheetStore:
             self.base_rows[key] = row
             url = (row[url_col] if len(row) > url_col else "").strip()
             if url:
-                self.base_by_url[url] = row
+                self.base_by_url.setdefault(url, []).append(row)
 
     def _base_for(self, event: dict, url: str) -> list | None:
         base = self.base_rows.get(event.get("id", ""))
         if base is not None:
             return base
-        return self.base_by_url.get(url) if url else None
+        if not url:
+            return None
+        # Ссылка одна на несколько событий (афиша РНД): сравнивать ручные
+        # правки можно только со строкой своего источника, иначе чужая
+        # карточка считалась «предыдущим состоянием» этой.
+        source_col = COLUMNS.index("source")
+        source = event.get("source", "")
+        same = [row for row in self.base_by_url.get(url) or []
+                if len(row) > source_col and row[source_col] == source]
+        return same[0] if len(same) == 1 else None
 
     def _merge_row(self, new_row: list, sheet_row: list, base_row: list | None) -> list:
         """Правило: что человек поправил руками — не затираем.
@@ -398,7 +415,12 @@ class SheetStore:
         url_col = COLUMNS.index("source_url")
         url = (row[url_col] if len(row) > url_col else "").strip()
         if url:
-            self.base_by_url[url] = row
+            same = [r for r in self.base_by_url.get(url) or []
+                    if (r[0] if r else "").strip() == key]
+            if same:
+                self.base_by_url[url][self.base_by_url[url].index(same[0])] = row
+            else:
+                self.base_by_url.setdefault(url, []).append(row)
 
     def _save_base(self) -> None:
         """Снимок — это то, что парсер предлагал, а не то, что стоит в таблице."""
@@ -449,7 +471,7 @@ class SheetStore:
 
             idx = self.existing.get(ev["id"])
             if idx is None and url:
-                idx = self.by_url.get(url)
+                idx = self._url_match(url, ev.get("source", ""))
             if idx is None:
                 # Ссылку могли поправить руками — тогда ищем по названию и дате.
                 key = _title_key(row[title_col], row[start_col])
